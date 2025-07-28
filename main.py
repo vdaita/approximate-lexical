@@ -159,27 +159,5 @@ def main():
         print("Overlap count: ", len(overlap), " out of ", len(baseline_retrieved_document_ids))
         print("Overlap: ", overlap)
 
-    # top_k = 128
-
-    # times = {
-    #     "bm25s": [],
-    #     "approx_search": [],
-    # }
-
-    # accuracy = {
-    #     "approx_search": [] # compute the set intersection between the bm25 results and the approx search results
-    # }
-
-    # for query in queries:
-    #     query_tokens = bm25s.tokenize(query, stopwords="en", stemmer=stemmer)
-
-    #     bm25s_start_time = time.perf_counter()
-    #     bm25s_results, bm25s_scores = retriever.retrieve(query_tokens, k=top_k)
-    #     bm25s_end_time = time.perf_counter()
-
-    #     approx_search_start_time = time.perf_counter()
-    #     approx_search_result = approx_search.search_index(query_tokens)
-    #     approx_search_end_time = time.perf_counter()
-
 if __name__ == "__main__":
     main()
