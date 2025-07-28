@@ -1,0 +1,15 @@
+[project]
+name = "gpu-lexical"
+version = "0.1.0"
+description = "Add your description here"
+readme = "README.md"
+requires-python = ">=3.10"
+dependencies = [
+    "bm25s[full]>=0.2.13",
+    "pystemmer>=3.0.0",
+    "spare",
+    "torch>=2.7.1",
+]
+
+[tool.uv.sources]
+spare = { git = "https://github.com/ieeta-pt/SPARe.git" }
