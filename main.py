@@ -27,6 +27,10 @@ def main():
         corpus_lst.append(val["title"] + " " + val["text"])
     del corpus
 
+    corpus_ids, corpus_lst = zip(*sorted(zip(corpus_ids, corpus_lst), key=lambda x: x[1]))
+    corpus_ids = list(corpus_ids)
+    corpus_lst = list(corpus_lst)
+
     stemmer = Stemmer.Stemmer("english")
     
     corpus_tokens = bm25s.tokenize(
@@ -52,7 +56,7 @@ def main():
 
     print("Tensor scores: ", tensor_scores, " Shape: ", tensor_scores.shape)
 
-    chunk_size = 32
+    chunk_size = 8
     num_rows = tensor_scores.shape[0]
     num_chunks = (num_rows + chunk_size - 1) // chunk_size
 
@@ -91,6 +95,8 @@ def main():
 
     first_num_chunks_selected = 64
     target_retrieved = 32
+
+    priority_target_compare = 16
 
     for query in queries:
         query_tokens = bm25s.tokenize(query, stopwords="en", stemmer=Stemmer.Stemmer("english"))
@@ -154,10 +160,16 @@ def main():
         ]
 
         print("Actual retrieved document indices: ", actual_retrieved_document_indices)
-
+        print("Comparisons made: ", chunked_tensor_scipy_dict['num_docs'], " + ", all_documents_scipy_dict['num_docs'], " = ", chunked_tensor_scipy_dict['num_docs'] + all_documents_scipy_dict['num_docs'], " out of ", len(corpus_lst))
+        print("Percentage comparisons: ", (chunked_tensor_scipy_dict['num_docs'] + all_documents_scipy_dict['num_docs']) / len(corpus_lst) * 100, "%")
         overlap = set(actual_retrieved_document_indices) & set(baseline_retrieved_document_ids.tolist())
-        print("Overlap count: ", len(overlap), " out of ", len(baseline_retrieved_document_ids))
+        print("Overlap count of actual top k: ", len(overlap), " out of ", len(baseline_retrieved_document_ids))
         print("Overlap: ", overlap)
+
+        print("Evaluating against the priority results: ", priority_target_compare)
+        priority_retrieved_documents = set(actual_retrieved_document_indices[:priority_target_compare]) & set(baseline_retrieved_document_ids.tolist())
+        print("Priority overlap count: ", len(priority_retrieved_documents), " out of ", priority_target_compare)
+        
 
 if __name__ == "__main__":
     main()
