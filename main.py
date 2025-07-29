@@ -64,14 +64,15 @@ def main():
 
     retriever = bm25s.BM25(backend='numba')
     retriever.index(corpus_tokens)
-    top_k = 100
-    dim_size = 256
+    top_k = 8
+    dim_size = 512
 
     random_matrix = generate_random_matrix(dim=dim_size, num_tokens=vocab_size)
     corpus_embeddings = np.zeros((corpus_size, dim_size), dtype=np.float32)
     for doc_id, doc in tqdm(enumerate(corpus_tokens.ids), total=corpus_size, desc="Processing corpus"):
         for token in doc:
             corpus_embeddings[doc_id] += random_matrix[token] * token_weights[token]
+        corpus_embeddings[doc_id] /= np.linalg.norm(corpus_embeddings[doc_id]) if np.linalg.norm(corpus_embeddings[doc_id]) > 0 else 1 
         
     index = hnswlib.Index(space='l2', dim=dim_size)
     index.init_index(max_elements=len(corpus_lst), ef_construction=200, M=16)
