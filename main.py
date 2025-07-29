@@ -13,18 +13,44 @@ import scipy
 from tqdm import tqdm
 import numpy as np
 import hnswlib
+from scipy.linalg import hadamard
 
 def generate_random_matrix(dim: int = 256, num_tokens: int = 25600):
     mat = np.random.randn(num_tokens, dim).astype(np.float32)
     norms = np.linalg.norm(mat, axis=1, keepdims=True)
     return mat / norms
 
+def report_approximate_distances(random_matrix, n=10000):
+    distances = []
+    for _ in range(n):
+        vec_index_1 = np.random.randint(0, random_matrix.shape[0])
+        vec_index_2 = np.random.randint(0, random_matrix.shape[0])
+        while vec_index_1 == vec_index_2:
+            vec_index_2 = np.random.randint(0, random_matrix.shape[0])
+        vec_1 = random_matrix[vec_index_1]
+        vec_2 = random_matrix[vec_index_2]
+        distances.append(np.dot(vec_1, vec_2))
+    
+    distances = np.array(distances)
+    print(f"Mean dot product: {distances.mean():.4f}")
+    print(f"Std deviation: {distances.std():.4f}")
+    print(f"Min dot product: {distances.min():.4f}")
+    print(f"Max dot product: {distances.max():.4f}")
+    print(f"25th percentile: {np.percentile(distances, 25):.4f}")
+    print(f"50th percentile (median): {np.percentile(distances, 50):.4f}")
+    print(f"75th percentile: {np.percentile(distances, 75):.4f}")
+
 def main():
     dataset = "scifact"
+    # dataset = "quora"
     dataset_dir = f"data/{dataset}"
 
     queries = [
-        "what is the diffusion coefficient of cerebral white matter?"
+        "what is the diffusion coefficient of cerebral white matter?",
+        "Is chemotherapy effective for treating cancer?",
+        "Is Cardiac injury is common in critical cases of COVID-19?",
+        "how is tlr7 stimulated in plasmacytoid cells",
+        "where is chromatin histones elongated"
     ]
 
     # queries = [
@@ -47,7 +73,9 @@ def main():
     corpus_lst = list(corpus_lst)
     corpus_size = len(corpus_lst)
 
-    print("IDs list: ", corpus_ids)
+    print("Corpus size: ", corpus_size)
+
+    # print("IDs list: ", corpus_ids)
 
     stemmer = Stemmer.Stemmer("english")
     
@@ -64,20 +92,43 @@ def main():
 
     retriever = bm25s.BM25(backend='numba')
     retriever.index(corpus_tokens)
-    top_k = 8
-    dim_size = 512
+    top_k = 32
+    dim_size = 1024
+
+    k1 = retriever.k1
+    b = retriever.b
+
+    top_k_multiplier = 10
 
     random_matrix = generate_random_matrix(dim=dim_size, num_tokens=vocab_size)
+
+    print("Random matrix orthogonality check: ")
+    report_approximate_distances(random_matrix)
+
     corpus_embeddings = np.zeros((corpus_size, dim_size), dtype=np.float32)
-    for doc_id, doc in tqdm(enumerate(corpus_tokens.ids), total=corpus_size, desc="Processing corpus"):
-        for token in doc:
-            corpus_embeddings[doc_id] += random_matrix[token] * token_weights[token]
-        corpus_embeddings[doc_id] /= np.linalg.norm(corpus_embeddings[doc_id]) if np.linalg.norm(corpus_embeddings[doc_id]) > 0 else 1 
-        
+    doc_lengths = np.array([len(doc) for doc in corpus_tokens.ids])
+    average_doc_length = np.mean(doc_lengths)
+
+    print("Average document length: ", average_doc_length)
+
+    for doc_id, (doc, doc_length) in tqdm(enumerate(zip(corpus_tokens.ids, doc_lengths)), total=corpus_size, desc="Processing corpus"):
+        token_counts = np.bincount(doc, minlength=vocab_size)
+        for token, count in enumerate(token_counts):
+            if count > 0:
+                doc_token_score = (token_counts[token] * (k1 + 1)) / (token_counts[token] * (k1 * (1 - b + b * doc_length / average_doc_length)))
+                # corpus_embeddings[doc_id] += (random_matrix[token]) * (token_counts[token] * (k1 + 1)) / (token_counts[token] * (k1 * (1 - b + b * doc_length / average_doc_length)))
+                # corpus_embeddings[doc_id] += (random_matrix[token]) * (token_counts[token])
+
+                corpus_embeddings[doc_id] += random_matrix[token] * doc_token_score * token_weights[token]
+        norm = np.linalg.norm(corpus_embeddings[doc_id])
+        corpus_embeddings[doc_id] /= norm if norm > 0 else 1
+
     index = hnswlib.Index(space='l2', dim=dim_size)
-    index.init_index(max_elements=len(corpus_lst), ef_construction=200, M=16)
+    index.init_index(max_elements=len(corpus_lst), ef_construction=50, M=32)
     index.add_items(corpus_embeddings, list(range(len(corpus_lst))))
-    index.set_ef(top_k * 2)
+    index.set_ef(400)
+
+    print("Finished building HNSW index.")
 
     for query in tqdm(queries, desc="Processing queries"):
         query_tokens = bm25s.tokenize(query, stopwords="en", stemmer=Stemmer.Stemmer("english"))
@@ -91,19 +142,29 @@ def main():
         query_ids = retriever.get_tokens_ids(query_tokens)
 
         query_vector = np.zeros((dim_size,), dtype=np.float32)
-        for token in query_ids:
-            query_vector += random_matrix[token] * token_weights[token]
+        query_token_counts = np.bincount(query_ids, minlength=vocab_size)
+        for token, count in enumerate(query_token_counts):
+            if count > 0:
+                query_vector += random_matrix[token] * count
 
-        approx_labels, approx_distances = index.knn_query(query_vector, k=top_k)
+        query_vector /= np.linalg.norm(query_vector) if np.linalg.norm(query_vector) > 0 else 1
+
+        approx_labels, approx_distances = index.knn_query(query_vector, k=top_k * top_k_multiplier)
         approx_labels, approx_distances = approx_labels[0], approx_distances[0]
+
+        real_approx_labels = approx_labels[:top_k]
 
         print("Approx labels: ", approx_labels)
         print("Approx distances: ", approx_distances)
 
         document_intersection = set(baseline_retrieved_document_ids).intersection(set(approx_labels))
         print("Intersection of retrieved documents: ", document_intersection)
+        print("Intersection ratio with first stage: ", len(document_intersection), " / ", top_k)
 
-        print("Intersection ratio: ", len(document_intersection), " / ", top_k)
+        # Figure out what happens when you use the NN as first stage retrieval:
+        real_document_intersection = set(baseline_retrieved_document_ids).intersection(set(real_approx_labels))
+        print("Real intersection of retrieved documents: ", real_document_intersection)
+        print("Real intersection ratio: ", len(real_document_intersection), " / ", top_k)
 
         # approximate retrieval
 
