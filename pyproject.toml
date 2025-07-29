@@ -6,6 +6,7 @@ readme = "README.md"
 requires-python = ">=3.10"
 dependencies = [
     "bm25s[full]>=0.2.13",
+    "hnswlib>=0.8.0",
     "pystemmer>=3.0.0",
     "spare",
     "torch>=2.7.1",
