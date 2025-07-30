@@ -347,8 +347,13 @@ fn tokenize_query(query: String, tokenization: HashMap<String, usize>) -> Vec<(u
 }
 
 #[pymodule]
-fn al_rust(_py: Python, )
+fn al_rust(m: &Bound<'_, PyModule>) -> PyResult<()> {
+    m.add_function(wrap_pyfunction!(build_approx_index, m)?)?;
+    m.add_function(wrap_pyfunction!(search_approx_index, m)?)?;
+    m.add_function(wrap_pyfunction!(tokenize_query, m)?)?;
+    Ok(())
+}
 
 fn main() {
-    println!("Hello, world!");
+    println!("Approximate Lexical Rust Module");
 }
