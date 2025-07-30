@@ -1,0 +1,10 @@
+[package]
+name = "al-rust"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+rust-stemmers = "1.2"
+stopwords = "0.4"
+rayon = "1.8"
+indicatif = "0.17
