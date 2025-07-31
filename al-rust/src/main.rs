@@ -4,15 +4,8 @@ use stopwords::{Spark, Language, Stopwords};
 use std::collections::{HashMap, HashSet};
 use rayon::prelude::*;
 use indicatif::{ProgressBar, ProgressStyle};
-use pyo3::prelude::*; // for python bindings
+use pyo3::prelude::*;
 use kmeans::*;
-
-const DIM_SIZE: i32 = 512; // Dimension size for the dense vectors
-
-struct Block {
-    summary_vector: Vec<(usize, f32)>, // Summary vector with (token, weight)
-    content_vector: Vec<usize> // Indices of the content in the summary
-}
 
 struct TokenizedCorpus {
     documents: Vec<Vec<Vec<usize>>>,
@@ -28,7 +21,7 @@ struct KMeansResult {
 }
 
 struct Index {
-    posting_list: Vec<Vec<Block>>, // positing list for each token
+    posting_list: Vec<HashMap<i64, Vec<i32>>>, // positing list for each token
     quantized_doc_list: Vec<Vec<(i32, u8)>>, // list of documents with their token counts / scores (separately)
     word_to_index: HashMap<String, usize>
 }
@@ -222,12 +215,13 @@ fn tokenize_corpus(corpus: &[&str], k1: f32, b: f32) -> TokenizedCorpus {
     }
 }
 
-// strategy: first, build a series of clusters for a very small number of documents, and take the max for each coordinate
-// next, for the next level of centroids, take the average from the closest clusters
-// outputs: centroids (sparse summary vector) and their corresponding documents (Vec<Block>)
+fn hash_vector(vector: Vec<(usize, u8)>) -> i64 {
+    // generate a signature for the sparse vector using Minhash.
+    
+}
 
 #[pyfunction]
-fn build_approx_index(documents: &[Vec<String>]) -> Vec<Vec<Block>>{
+fn build_approx_index(documents: &[Vec<String>]) -> Vec<HashMap<i64, Vec<i32>>>{
     println!("Building index...");
     let tokenized_corpus: TokenizedCorpus = tokenize_corpus(documents);
     let mut index: Vec<Vec<Block>> = vec![Vec::new(); tokenized_corpus.word_to_index.len()];
@@ -250,83 +244,47 @@ fn build_approx_index(documents: &[Vec<String>]) -> Vec<Vec<Block>>{
         progress_bar.inc(1);
     }
 
-    // Compute centroids and assign documents to their randomly assigned centroids based on distance
-    let mut centroids: Vec<Vec<Vec<(usize, f32)>>> = vec![Vec::new(); tokenized_corpus.word_to_index.len()];
-    for (token_index, posting_list) in raw_posting_lists.iter().enumerate() {
-
-    }
+    // Compute hash signatures for each document and create buckets.
 }
 
 #[pyfunction]
-fn search_approx_index(posting_list: Vec<Vec<Block>>, doc_list: Vec<Vec<(i32, usize)>>, query: Vec<(usize, usize)>, top_k: i32, num_blocks_per_token_per_k: i32) -> Vec<usize> { // there should be a pair of i32, usize which represents the count
-    let first_pass_per_token = top_k * num_blocks_per_token_per_k;
-    let mut top_summary_vectors: Vec<Vec<usize>> = query
-        .into_iter()
-        .map(|(token_id, token_count)| {
-            let mut block_scores: Vec<f32> = Vec::new();
-            for block in &posting_list[token_id] {
-                let mut block_score = 0.0;
-                
-                let mut query_index: i32 = 0;
-                let mut summary_index: i32 = 0;
-                while (query_index < query.len() && summary_index < block.summary_vector.len()) {
-                    if query[query_index].0 == block.summary_vector[summary_index].0 {
-                        block_score += block.summary_vector[summary_index].1 * token_count as f32;
-                        query_index += 1;
-                    } else if query[query_index].0 < block.summary_vector[summary_index].0 {
-                        query_index += 1;
-                    } else {
-                        summary_index += 1;
-                    }
-                }
+fn search_approx_index(posting_list: Vec<HashMap<i64, Vec<i32>>, doc_list: Vec<Vec<(i32, usize)>>, query: Vec<(usize, usize)>, top_k: i32, num_blocks_per_token_per_k: i32) -> Vec<usize> { // there should be a pair of i32, usize which represents the count
+    let query_hash = hash_vector(query);
+    let mut first_pass_results: Vec<usize> = Vec::new();
+    let mut first_pass_buckets: Vec<usize> = Vec::new();
 
-                block_scores.push(block_score);
-            }
+    for (token_index, _) in query {
 
-            let mut scored_blocks: Vec<(usize, f32)> = block_scores
-                .into_iter()
-                .enumerate()
-                .collect();
-            scored_blocks.sort_by(|a, b| b.1.partial_cmp(&a.1).unwrap());
-            scored_blocks.truncate(top_k * num_blocks_per_token_per_k as usize);
-            return scored_blocks.map(|a, b| a)
-        }); 
-    
-    for (token_id, token_count) in query {
-        println!("Analyzing the first {} blocks out of {} potential blocks for token {}", first_pass_per_token, posting_list[token_id].len(), token_id);
+        first_pass_results.extend(posting_list[token_index].get(&query_hash));    
     }
+    first_pass_results = first_pass_results.into_iter().collect::<HashSet<_>>().into_iter().collect();
 
-    let dedup_documents: Vec<usize> = top_summary_vectors
-        .into_iter()
-        .flat_map(|blocks| doc_list[block])
-        .collect::<HashSet<_>>()
-        .into_iter()
-        .collect();
-    
-    // for each of the blocks, we need to identify the unique documents, and then calculate the scores
-    let scored_documents = dedup_documents
-        .into_iter()
-        .map(|doc_id| {
-            let mut score = 0.0;
-            let mut doc_i = 0;
-            let mut query_i = 0;
-            while doc_i < top_summary_vectors.len() && query_i < query.len() {
-                if top_summary_vectors[doc_i].0 == query[query_i].0 {
-                    score += top_summary_vectors[doc_i].1 * query[query_i].1 as f32;
-                    doc_i += 1;
-                    query_i += 1;
-                } else if top_summary_vectors[doc_i].0 < query[query_i].0 {
-                    doc_i += 1;
-                } else {
-                    query_i += 1;
-                }
+    for (token_in)
+
+    let mut second_pass_results;
+    for (doc_index) in first_pass_result {
+        let doc_vector = doc_list[doc_index];
+        let mut score = 0.0;
+        let mut dv_idx = 0;
+        let mut q_idx = 0;
+
+        while(dv_idx < doc_vector.len() && q_idx < query.len()) {
+            if doc_vector[dv_idx].0 == query[q_idx].0 {
+                score += doc_vector[dv_idx].1 as f32 * query[q_idx].1 as f32; // multiply the scores
+                dv_idx += 1;
+                q_idx += 1;
+            } else if doc_vector[dv_idx].0 < query[q_idx].0 {
+                dv_idx += 1;
+            } else {
+                q_idx += 1;
             }
-            (doc_id, score)
-        })
-        .collect::<Vec<_>>();
+        }
+        second_pass_results.push((doc_index, score));
+    }
+    second_pass_results.sort_by(|a, b| b.1.partial_cmp(&a.1).unwrap());
+    second_pass_results.truncate(top_k as usize);
 
-    // These documents were properly scored
-    scored_documents
+    second_pass_results.into_iter().map(|(doc_index, _)| doc_index).collect()
 }
 
 #[pyfunction]
