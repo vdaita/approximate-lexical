@@ -1,15 +1,5 @@
 import matplotlib
 
-# Try to use TkAgg for interactive, fallback to Agg for headless environments
-try:
-    matplotlib.use('TkAgg')
-    from matplotlib import pyplot as plt
-    INTERACTIVE = True
-except Exception:
-    matplotlib.use('Agg')
-    from matplotlib import pyplot as plt
-    INTERACTIVE = False
-
 import al_rust
 import bm25s
 import typer
@@ -18,7 +8,10 @@ from bm25s.scoring import _calculate_doc_freqs, _build_idf_array, _select_idf_sc
 from tqdm import tqdm
 from rich import print
 import numpy as np
+from rich.table import Table
+from rich.console import Console
 import scipy.sparse as sp
+import matplotlib.pyplot as plt
 
 def embed_query(query: str, retriever: bm25s.BM25, token_weights: np.ndarray):
     """
@@ -100,7 +93,9 @@ def main(source: str, top_k_target: int):
     coverage_topks = []
     upper_bound = [] # compare to the sum of lengths of posting lists
 
-    for query in tqdm(queries, desc="Processing queries"):
+    points = []
+
+    for query_index, query in tqdm(enumerate(queries), desc="Processing queries"):
         
         # BM25s search
         query_tokens = bm25s.tokenize(query, stopwords="en", stemmer=stemmer, leave=False)
@@ -111,50 +106,42 @@ def main(source: str, top_k_target: int):
         weighted_query, num_tokens = embed_query(query, retriever, token_weights)
 
         # Find minimal top_k for approx search to cover all bm25 top_k
-        found_k = None
         for k in range(top_k_target, corpus_size, max(10, top_k_target)):
             approx_top_ids = al_rust.search_approx_index(
                 index=approx_index,
                 query=weighted_query,
                 top_k=k
             )
-            if set(bm25s_retrieved_documents_ids).issubset(approx_top_ids):
-                found_k = k
-                break
-        if found_k is None:
-            found_k = corpus_size
+            intersection_amount = len(set(bm25s_retrieved_documents_ids).intersection(approx_top_ids))
 
-        upper_bound_sum = sum(len(posting_list[token]) for token in [pair[0] for pair in weighted_query])
-        print("Tokens that have 0 coverage:", [pair[0] for pair in weighted_query if len(posting_list[pair[0]]) == 0], " out of tokens ", [pair[0] for pair in weighted_query])
-        coverage_topks.append(found_k / (1 + upper_bound_sum))
-        approx_results.append(approx_top_ids)
-
-    # Print recall results for each query
-    for i, query in enumerate(queries):
-        bm25_ids = set(bm25s_results[i])
-        recalls = []
-        weighted_query, _ = embed_query(query, retriever, token_weights)
-        query_token_ids = [pair[0] for pair in weighted_query]
-        total_posting_list_elements = sum(len(posting_list[token_id]) for token_id in query_token_ids)
-
-        ks = list(range(top_k_target, int(coverage_topks[i]*corpus_size)+1, max(1, top_k_target//5)))
-        fractions = []
-        for k in ks:
-            posting_list_elements_accessed = total_posting_list_elements
-            fraction_accessed = posting_list_elements_accessed / (1 + total_posting_list_elements)
-            fractions.append(fraction_accessed)
-
-        for idx, k in enumerate(ks):
-            approx_ids = al_rust.search_approx_index(
-                index=approx_index,
-                query=weighted_query,
-                top_k=k
+            proportion_seen = k / sum(len(posting_list[token[0]]) for token in weighted_query)
+            coverage = intersection_amount / top_k_target
+            points.append(
+                (query_index, proportion_seen, coverage)
             )
-            recall = len(bm25_ids.intersection(approx_ids)) / len(bm25_ids)
-            recalls.append(recall)
-        print(f"\n[bold blue]Query {i+1}:[/bold blue] {query}")
-        for frac, rec, k in zip(fractions, recalls, ks):
-            print(f"  Top-k={k}, Fraction Viewed={frac:.4f}, Recall={rec:.4f}")
+
+    # Convert points to numpy array for easier plotting
+    points_arr = np.array(points)
+
+    # Plot each query's points with a different color
+    for query_index in range(len(queries)):
+        query_points = points_arr[points_arr[:,0] == query_index]
+        plt.plot(query_points[:,1], query_points[:,2], label=f"Query {query_index+1}")
+
+        # Report out in text with rich
+        table = Table(title=f"Query {query_index+1}: {queries[query_index]}")
+        table.add_column("Proportion Seen", justify="right")
+        table.add_column("Coverage", justify="right")
+        for x, y in zip(query_points[:,1], query_points[:,2]):
+            table.add_row(f"{x:.3f}", f"{y:.3f}")
+        console = Console()
+        console.print(table)
+
+    plt.xlabel("Proportion Seen")
+    plt.ylabel("Coverage")
+    plt.title("Coverage vs Proportion Seen for Each Query")
+    plt.legend()
+    plt.show()
 
 if __name__ == "__main__":
     typer.run(main)
