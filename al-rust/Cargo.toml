@@ -9,6 +9,7 @@ stopwords = "0.4"
 rayon = "1.8"
 indicatif = "0.17"
 kmeans = "2.0.1"
+hamming = "0.1"
 pyo3 = { version = "0.21", features = ["extension-module"] }
 
 [lib]
