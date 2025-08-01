@@ -1,15 +1,24 @@
+[build-system]
+requires = ["maturin==1.9.2"]
+build-backend = "maturin"
+
+[tool.maturin]
+manifest-path = "al-rust/Cargo.toml"
+
 [project]
-name = "gpu-lexical"
+name = "approximate-lexical"
 version = "0.1.0"
-description = "Add your description here"
+description = "Approximate lexical search using Rust and Python, testing against BM25s."
 readme = "README.md"
 requires-python = ">=3.10"
 dependencies = [
     "bm25s[full]>=0.2.13",
     "hnswlib>=0.8.0",
+    "matplotlib>=3.10.5",
     "pystemmer>=3.0.0",
     "spare",
     "torch>=2.7.1",
+    "typer>=0.16.0",
 ]
 
 [tool.uv.sources]
