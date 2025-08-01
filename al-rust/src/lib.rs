@@ -1,25 +1,16 @@
 use std::collections::{HashMap};
 use pyo3::prelude::*;
-use std::time::Instant;
-use rand::prelude::*;
-
-macro_rules! profile {
-    ($name:expr, $block:block) => {{
-        let start = Instant::now();
-        let result = $block;
-        println!("{} took {:?}", $name, start.elapsed());
-        result
-    }};
-}
+use rand::rng;
+use rand_distr::{Distribution, StandardNormal};
 
 // --- Hashing and Indexing ---
 
-fn hash_vector(vector: &[(usize, f32)], hash_proj: &[Vec<i8>]) -> u16 {
+fn hash_vector(vector: &[(usize, f32)], hash_proj: &[Vec<f32>]) -> u16 {
     let mut hash: u16 = 0;
     for (i, proj) in hash_proj.iter().enumerate() {
         let mut score = 0.0;
         for &(idx, val) in vector {
-            score += proj[idx % proj.len()] as f32 * val;
+            score += proj[idx % proj.len()] * val;
         }
         if score > 0.0 {
             hash |= 1 << i;
@@ -31,53 +22,49 @@ fn hash_vector(vector: &[(usize, f32)], hash_proj: &[Vec<i8>]) -> u16 {
 #[pyclass]
 #[derive(Clone)]
 struct TermCluster {
-    hash_proj: Vec<Vec<i8>>,
+    hash_proj: Vec<Vec<f32>>,
     hashes_to_documents: HashMap<u16, Vec<usize>>,
 }
 
 impl TermCluster {
     fn new(documents: &[Vec<(usize, f32)>], vocab_size: usize) -> Self {
-        profile!("Building TermCluster", {
-            let hash_dim = 16;
-            let mut rng = rand::rng();
-            let hash_proj: Vec<Vec<i8>> = (0..hash_dim)
-                .map(|_| {
-                    (0..vocab_size)
-                        .map(|_| if rng.random::<f32>() < 0.5 { -1 } else { 1 })
-                        .collect()
-                })
-                .collect();
+        let hash_dim = 32;
+        let mut rng = rng();
+        let hash_proj: Vec<Vec<f32>> = (0..hash_dim)
+            .map(|_| {
+                (0..vocab_size)
+                    .map(|_| <StandardNormal as Distribution<f32>>::sample(&StandardNormal, &mut rng))
+                    .collect()
+            })
+            .collect();
 
-            let mut hashes_to_documents: HashMap<u16, Vec<usize>> = HashMap::new();
-            for (doc_idx, doc) in documents.iter().enumerate() {
-                let hash = hash_vector(doc, &hash_proj);
-                hashes_to_documents.entry(hash).or_default().push(doc_idx);
-            }
+        let mut hashes_to_documents: HashMap<u16, Vec<usize>> = HashMap::new();
+        for (doc_idx, doc) in documents.iter().enumerate() {
+            let hash = hash_vector(doc, &hash_proj);
+            hashes_to_documents.entry(hash).or_default().push(doc_idx);
+        }
 
-            Self {
-                hash_proj,
-                hashes_to_documents,
-            }
-        })
+        Self {
+            hash_proj,
+            hashes_to_documents,
+        }
     }
 
     fn search(&self, query: &[(usize, f32)], top_k: usize) -> Vec<usize> {
-        profile!("TermCluster search", {
-            let query_hash = hash_vector(query, &self.hash_proj);
-            // BFS Hamming search
-            let mut results = Vec::new();
-            for dist in 0..=16 {
-                for hash in (0..=u16::MAX).filter(|h| hamming_distance(*h, query_hash) == dist) {
-                    if let Some(docs) = self.hashes_to_documents.get(&hash) {
-                        results.extend(docs);
-                        if results.len() >= top_k {
-                            return results.into_iter().take(top_k).collect();
-                        }
+        let query_hash = hash_vector(query, &self.hash_proj);
+        // BFS Hamming search
+        let mut results = Vec::new();
+        for dist in 0..=16 {
+            for hash in (0..=u16::MAX).filter(|h| hamming_distance(*h, query_hash) == dist) {
+                if let Some(docs) = self.hashes_to_documents.get(&hash) {
+                    results.extend(docs);
+                    if results.len() >= top_k {
+                        return results.into_iter().take(top_k).collect();
                     }
                 }
             }
-            results.into_iter().take(top_k).collect()
-        })
+        }
+        results.into_iter().take(top_k).collect()
     }
 }
 
@@ -122,14 +109,12 @@ struct Index {
 
 impl Index {
     fn build(scored_documents: &[Vec<(usize, f32)>], vocab_size: usize) -> Self {
-        profile!("Building Index", {
-            let clusters = TermCluster::new(scored_documents, vocab_size);
-            Self {
-                clusters,
-                doc_list: scored_documents.to_vec(),
-                vocab_size,
-            }
-        })
+        let clusters = TermCluster::new(scored_documents, vocab_size);
+        Self {
+            clusters,
+            doc_list: scored_documents.to_vec(),
+            vocab_size,
+        }
     }
 
     fn search(
@@ -137,20 +122,18 @@ impl Index {
         query_vec: &[(usize, f32)],
         top_k: usize,
     ) -> Vec<usize> {
-        profile!("Index search", {
-            let candidates = self.clusters.search(query_vec, top_k * 10); // Overfetch for better recall
-            let mut scored: Vec<(usize, f32)> = candidates
-                .into_iter()
-                .map(|doc_idx| {
-                    let doc_vec = &self.doc_list[doc_idx];
-                    (doc_idx, sparse_inner_product(query_vec, doc_vec))
-                })
-                .collect();
+        let candidates = self.clusters.search(query_vec, top_k); // Overfetch for better recall
+        let mut scored: Vec<(usize, f32)> = candidates
+            .into_iter()
+            .map(|doc_idx| {
+                let doc_vec = &self.doc_list[doc_idx];
+                (doc_idx, sparse_inner_product(query_vec, doc_vec))
+            })
+            .collect();
 
-            scored.sort_by(|a, b| b.1.partial_cmp(&a.1).unwrap());
-            scored.truncate(top_k);
-            scored.into_iter().map(|(idx, _)| idx).collect()
-        })
+        scored.sort_by(|a, b| b.1.partial_cmp(&a.1).unwrap());
+        scored.truncate(top_k);
+        scored.into_iter().map(|(idx, _)| idx).collect()
     }
 }
 
@@ -174,12 +157,8 @@ fn search_approx_index(
 }
 
 #[pymodule]
-fn al_rust(_py: Python, m: &PyModule) -> PyResult<()> {
+fn al_rust(_py: Python<'_>, m: &PyModule) -> PyResult<()> {
     m.add_function(wrap_pyfunction!(build_approx_index, m)?)?;
     m.add_function(wrap_pyfunction!(search_approx_index, m)?)?;
     Ok(())
-}
-
-fn main() {
-    println!("Approximate Lexical Rust Module");
 }
