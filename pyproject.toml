@@ -4,6 +4,7 @@ build-backend = "maturin"
 
 [tool.maturin]
 manifest-path = "./al-rust/Cargo.toml"
+features = ["pyo3/extension-module"]
 
 [project]
 name = "approximate-lexical"

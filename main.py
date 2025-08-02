@@ -26,7 +26,7 @@ def embed_query(query: str, retriever: bm25s.BM25, token_weights: np.ndarray):
     pairs = [(token_id, normalized_weights[token_id]) for token_id in unique_token_ids]
     return pairs, np.sum(query_token_ids_count)
 
-def main(source: str, top_k_target: int):
+def main(source: str, top_k_target: int, micro: bool):
     if source == "scifact":
         queries = [
             "what is the diffusion coefficient of cerebral white matter?",
@@ -55,7 +55,6 @@ def main(source: str, top_k_target: int):
         corpus_lst.append(val["title"] + " " + val["text"])
     del corpus
 
-    corpus_ids = list(range(len(corpus_lst)))
     corpus_lst = list(corpus_lst)
     corpus_size = len(corpus_lst)
 
@@ -84,16 +83,38 @@ def main(source: str, top_k_target: int):
 
     approx_index = al_rust.build_approx_index(
         scored_documents=posting_list,
-        vocab_size=vocab_size
+        vocab_size=vocab_size,
+        micro=micro
     )
 
     bm25s_results = []
-    approx_results = []
-
-    coverage_topks = []
-    upper_bound = [] # compare to the sum of lengths of posting lists
-
     points = []
+
+    if micro:
+        print("Microbenchmark mode enabled. This will only process the first query.")
+        query = queries[0]
+        top_k_target = 32  # Set a small top_k for microbenchmarking
+
+        query_tokens = bm25s.tokenize(query, stopwords="en", stemmer=stemmer, leave=False)
+        bm25s_retrieved_documents = retriever.retrieve(query_tokens, k=top_k_target)
+        bm25s_retrieved_documents_ids = bm25s_retrieved_documents[0][0]
+
+        print("BM25s Retrieved Documents IDs:", bm25s_retrieved_documents_ids)
+        weighted_query, num_tokens = embed_query(query, retriever, token_weights)
+
+        approx_top_ids = al_rust.search_approx_index(
+            index=approx_index,
+            query=weighted_query,
+            top_k=top_k_target,
+            micro=micro
+        )
+        intersection_amount = len(set(bm25s_retrieved_documents_ids).intersection(approx_top_ids))
+
+        print("Query:", query)
+        print("Approx Top IDs:", approx_top_ids)
+        print("Intersection size: ", intersection_amount)
+        
+        return
 
     for query_index, query in tqdm(enumerate(queries), desc="Processing queries"):
         
@@ -110,11 +131,14 @@ def main(source: str, top_k_target: int):
             approx_top_ids = al_rust.search_approx_index(
                 index=approx_index,
                 query=weighted_query,
-                top_k=k
+                top_k=k,
+                micro=micro
             )
             intersection_amount = len(set(bm25s_retrieved_documents_ids).intersection(approx_top_ids))
+            if k == top_k_target: # this is the first one:
+                print(f"Query {query_index+1}: BM25s top-k={len(bm25s_retrieved_documents_ids)}, Approx top-k={k}, Intersection={intersection_amount}, Retrieved documents={approx_top_ids}")
 
-            proportion_seen = k / sum(len(posting_list[token[0]]) for token in weighted_query)
+            proportion_seen = k / top_k_target
             coverage = intersection_amount / top_k_target
             points.append(
                 (query_index, proportion_seen, coverage)
