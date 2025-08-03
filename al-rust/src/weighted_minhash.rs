@@ -14,85 +14,59 @@ struct WeightedMinHash {
     pub hashvalues: Array2<f32>
 }
 
-fn hash_weighted_minhash(minhash: WeightedMinHash, num_projections: int) -> BitVec {
-
-}
-
 struct WeightedMinHasher {
-    pub dim: u32,
-    pub sample_size: usize,
-    pub seed: usize,
-    pub rs: Array2<f32>,
-    pub ln_cs: Array2<f32>,
-    pub betas: Array2<f32>,
+    pub num_perm: u32,
+    pub seed: u64,
+    pub discretization_param: u32,
+    pub max_vocab_size: usize,
+    pub hash_proj: Vec<Vec<bool>>
 }
 
 impl WeightedMinHasher {
-    pub fn new(dim: usize, sample_size: usize, seed: u64, micro: bool) -> Self {
-        if micro {
-            println!("[micro] WeightedMinHash::new called with dim={}, sample_size={}, seed={}", dim, sample_size, seed);  
-        }
-        
-        let mut rng = rand::rng();
-
-        let gamma_dist = Gamma::new(2.0, 1.0).unwrap();
-        let uniform_dist = Uniform::new(0.0, 1.0);
-        let rs = Array::from_shape_fn((sample_size, dim), |_| gamma_dist.sample(&mut rng) as f32);
-        let ln_cs = Array.from_shape_fn((sample_size, dim), |_| {
-            let sample = gamma_dist.sample(&mut rng);
-            sample.ln() as f32
-        });
-        let betas = Array::from_shape_fn((sample_size, dim), |_| uniform_dist.sample(&mut rng) as f32);        
+    pub fn new(num_perm: u32, seed: u64, discretization_param: u32, max_vocab_size: usize) -> Self {
+        let mut rng = StdRng::seed_from_u64(seed);
+        let hash_proj: Vec<Vec<bool>> = (0..num_perm)
+            .map(|_| {
+                (0..max_vocab_size)
+                    .map(|_| rng.gen_bool(0.5)) // Randomly choose true/false
+                    .collect()
+            })
+            .collect();
 
         Self {
-            dim,
-            sample_size,
+            num_perm,
             seed,
-            rs,
-            ln_cs,
-            betas
+            discretization_param,
+            max_vocab_size,
+            hash_proj
         }
     }
 
-    pub fn minhash(
-        self: &Self,
-        vector: Vec<(usize, f32)>,
-        micro: bool
-    ) -> WeightedMinHash {
-        if micro {
-            println!("[micro] WeightedMinHasher::minhash called with vector length={}", vector.len());
-        }
+    fn round(&self, vector: Vec<(usize, f32)>) -> Vec<(usize, f32)> {
+        let magnitude: f32 = vector.iter().map(|&(_, v)| v * v).sum::<f32>().sqrt();
+        let unit_vector: Vec<(usize, f32)> = vector
+            .iter()
+            .map(|&(idx, val)| (idx, val / magnitude))
+            .collect();
+        
+        let mut z_tilde: Vec<(usize, f32)> = unit_vector
+            .iter()
+            .map(|&(idx, val)| (idx, val.signum() * (floorf32(val * val * self.discretization_param) / self.discretization_param)))
+            .collect();
+        let i_star = z.iter()
+            .max_by(|&(idx1, val1), &(idx2, val2)| (val1.abs()).partial_cmp(val2.abs()).unwrap())
+            .map(|&(idx, _)| idx)
+            .collect();
+        
+        let magnitude_z_tilde: f32 = z_tilde.iter().map(|&(_, v)| v * v).sum::<f32>().sqrt();
+        let sigma = 1 - (magnitude_z_tilde * magnitude_z_tilde);
 
-        let mut hashvalues = Array2::<f32>::zeros((self.sample_size, 2));
-        let mut vlog: Vec<usize, f32> = vector.iter().map(|idx, val| {
-            return (idx, val.ln());
-        });
+        z_tilde[i_star] = (i_star, sqrt(z_tilde[i_star].1 * z_tilde[i_star].1 + sigma));
+        z_tilde
+    }
 
-        for sample_idx in 0..self.sample_size {
-            let t: Vec<(usize, f32)> = vector.iter().map(|(vocab_idx, val)| {
-                let hashed_vocab_idx = vocab_idx % self.dim;
-                let t = (val / self.rs[[sample_idx, hashed_vocab_idx]]) + self.betas[[sample_idx, hashed_vocab_idx]];
-                (vocab_idx, t)
-            }).collect();
-
-            let ln_y: HashMap<(usize, f32)> = t.iter().map(|(vocab_idx, t_val)| {
-                let hashed_vocab_idx = vocab_idx % self.dim;
-                (*vocab_idx, t_val - self.betas[[sample_idx, hashed_vocab_idx]]) * self.rs[[sample_idx, hashed_vocab_idx]]
-            }).collect();
-
-            let ln_a: Vec<(usize, f32)> = vector.iter().map(|(vocab_idx, _)| {
-                let hashed_vocab_idx = vocab_idx % self.dim;
-                (vocab_idx, self.ln_cs[[sample_idx, hashed_vocab_idx]] - ln_y.get(vocab_idx) - self.rs[[sample_idx, hashed_vocab_idx]])
-            }).collect();
-
-            let k = ln_a.iter().enumerate().min_by(|(_, a), (_, b)| a.partial_cmp(b).unwrap()).map(|(i, _)| i).unwrap_or(0);
-            hashvalues[[sample_idx, 0]] = k as f32;
-            hashvalues[[sample_idx, 1]] = t[k];
-        }
-
-        WeightedMinMash {
-            seed: self.seed,
-            hashvalues: hashvalues
-        }
+    pub fn hash(&self, vector: Vec<(usize, f32)>) -> BitVec {
+        let a_tilde = self.round(vector);
+        
     }
 }
