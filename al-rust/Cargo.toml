@@ -9,6 +9,10 @@ indicatif = "0.17"
 rand = "0.9.2"
 pyo3 = { version = "0.21", features = ["extension-module"] }
 rand_distr = "0.5.1"
+dartminhash = "0.1.0"
+ndarray = "0.16.1"
+twox-hash = "2.1.1"
+bitvec_simd = "0.20.5"
 
 [lib]
 crate-type = ["cdylib"]

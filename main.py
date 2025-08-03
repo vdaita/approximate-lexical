@@ -78,6 +78,11 @@ def main(source: str, top_k_target: int, micro: bool):
     )
 
     posting_list = [[] for _ in range(vocab_size)]
+
+    print("Maximum column: ", max(scores_coo.col))
+    print("Maximum row: ", max(scores_coo.row))
+    print("Number of non-zero entries: ", scores_coo.nnz)
+
     for i,j,v in tqdm(zip(scores_coo.row, scores_coo.col, scores_coo.data)):
         posting_list[j].append((i, v))
 

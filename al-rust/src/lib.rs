@@ -2,6 +2,12 @@ use std::collections::{HashMap};
 use pyo3::prelude::*;
 use rand::rng;
 use rand_distr::{Distribution, StandardNormal};
+use dartminhash::DartMinHash;
+use ndarray::prelude::*;
+use ndarray::Array;
+mod weighted_minhash;
+mod lsh_searcher;
+
 // --- Hashing and Indexing ---
 
 fn hash_vector(vector: &[(usize, f32)], hash_proj: &[Vec<f32>]) -> u16 {
@@ -17,6 +23,8 @@ fn hash_vector(vector: &[(usize, f32)], hash_proj: &[Vec<f32>]) -> u16 {
     }
     hash
 }
+
+// -- Weighted Minhash Sketching --- 
 
 #[pyclass]
 #[derive(Clone)]
