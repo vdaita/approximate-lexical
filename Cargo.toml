@@ -1,0 +1,16 @@
+[package]
+name = "approximate-lexical"
+version = "0.1.0"
+edition = "2021"
+
+# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
+[lib]
+name = "approximate_lexical"
+crate-type = ["cdylib"]
+
+[dependencies]
+bitvec_simd = "0.20.5"
+ndarray = "0.16.1"
+pyo3 = "0.25.0"
+rand = "0.9.2"
+rand_distr = "0.5.1"

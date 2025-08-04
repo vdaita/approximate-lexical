@@ -1,0 +1,32 @@
+[build-system]
+requires = ["maturin>=1.9,<2.0"]
+build-backend = "maturin"
+
+[project]
+name = "approximate-lexical"
+requires-python = ">=3.11"
+classifiers = [
+    "Programming Language :: Rust",
+    "Programming Language :: Python :: Implementation :: CPython",
+    "Programming Language :: Python :: Implementation :: PyPy",
+]
+dynamic = ["version"]
+[tool.maturin]
+features = ["pyo3/extension-module"]
+
+[tool.poetry]
+name = "approximate-lexical"
+version = "0.0.1"
+description = "A Python package that uses Rust for approximate lexical analysis."
+authors = ["Vijay Daita <vdaita@gmail.com>"]
+
+[tool.poetry.dependencies]
+scipy = "^1.16.1"
+numpy = "^2.3.2"
+bm25s = "^0.2.13"
+typer = "^0.16.0"
+stemmer = "^0.0.4"
+tqdm = "^4.67.1"
+rich = "^14.1.0"
+matplotlib = "^3.10.5"
+pystemmer = "^3.0.0"
