@@ -99,9 +99,6 @@ def main(source: str, top_k_target: int, micro: bool):
                 micro
             )
             intersection_amount = len(set(bm25s_retrieved_documents_ids).intersection(approx_top_ids))
-            if k == top_k_target: # this is the first one:
-                print(f"Query {query_index+1}: BM25s top-k={len(bm25s_retrieved_documents_ids)}, Approx top-k={k}, Intersection={intersection_amount}, Retrieved documents={approx_top_ids}")
-
             proportion_seen = k / top_k_target
             coverage = intersection_amount / top_k_target
             points.append(
@@ -110,7 +107,8 @@ def main(source: str, top_k_target: int, micro: bool):
 
             if micro:
                 print("Query:", query)
-                print("Approx Top IDs:", approx_top_ids)
+                print("Approx Top IDs:", np.array(approx_top_ids))
+                print("BM25s Retrieved IDs:", bm25s_retrieved_documents_ids)
                 print("Intersection size: ", intersection_amount)
                 return
 
