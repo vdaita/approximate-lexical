@@ -1,7 +1,9 @@
 use std::collections::{HashMap};
 use rand_distr::{Distribution, Gamma, Uniform};
 use rand::rngs::StdRng;
-use rand::{SeedableRng, Rng};
+use rand::{SeedableRng};
+use indicatif::{ProgressBar, ProgressStyle};
+use rayon::prelude::*;
 
 pub fn hash(i: usize, j: u32, seed: u32) -> u64 {
     (((i as u32) * 71 + j * 23 + seed * 7)) as u64
@@ -16,6 +18,35 @@ pub fn uniform_sample(i: usize, j: u32, seed: u32, uniform: &Uniform<f32>) -> f3
     let mut rng = StdRng::seed_from_u64(hash(i, j, seed));
     uniform.sample(&mut rng)
 }
+
+fn hash_band(vector: &[(usize, f32)], band: usize, r_seed: u32, c_seed: u32, b_seed: u32, gamma: &Gamma<f32>, uniform: &Uniform<f32>, micro: bool) -> usize {
+    let t: Vec<(usize, f32)> = vector.iter().map(|&(index, weight)| {
+        let r_ij = gamma_sample(index, band as u32, r_seed, gamma);
+        let b_ij = uniform_sample(index, band as u32, b_seed, uniform);
+        let t_ij = ((weight.ln() / r_ij) + b_ij).floor();
+        (index, t_ij)
+    }).collect();
+
+    let y: Vec<(usize, f32)> = t.iter().map(|&(index, t_ij)| {
+        let b_ij = uniform_sample(index, band as u32, b_seed, uniform);
+        let r_ij = gamma_sample(index, band as u32, r_seed, gamma);
+
+        let y_ij = (r_ij * (t_ij - b_ij)).exp();
+        (index, y_ij)
+    }).collect();
+
+    let a: Vec<(usize, f32)> = y.iter().map(|&(index, y_ij)| {
+        let c_ij = gamma_sample(index, band as u32, c_seed, gamma);
+        let r_ij = gamma_sample(index, band as u32, r_seed, gamma);
+
+        let a_ij = c_ij / (y_ij * r_ij.exp());
+        (index, a_ij)
+    }).collect();
+
+    let min_index = a.iter().min_by(|a, b| a.1.partial_cmp(&b.1).unwrap()).map(|&(index, _)| index);
+    min_index.expect("At least one element should be present in the vector")
+}
+
 
 #[derive(Debug, Clone)]
 pub struct WeightedMinHashLSH {
@@ -36,13 +67,6 @@ impl WeightedMinHashLSH {
         if micro {
             println!("[micro] WeightedMinHashLSH::new called");
         }
-        let mut hashmaps: Vec<HashMap<usize, Vec<usize>>> = Vec::with_capacity(num_bands);
-        for i in 0..num_bands {
-            if micro {
-                println!("[micro] Initializing hashmap for band {}", i);
-            }
-            hashmaps.push(HashMap::new());
-        }
 
         let gamma = Gamma::new(2.0, 1.0).unwrap();
         let uniform = Uniform::new(0.0, 1.0).unwrap();
@@ -51,64 +75,38 @@ impl WeightedMinHashLSH {
         let c_seeds: Vec<u32> = (0..num_bands).map(|i| seed + i as u32 + num_bands as u32).collect();
         let b_seeds: Vec<u32> = (0..num_bands).map(|i| seed + i as u32 + num_bands as u32 * 2).collect();
 
-        // Create a temporary instance to call hash_band
-        let temp_lsh = WeightedMinHashLSH {
-            hashmaps: hashmaps.clone(),
+        // Progress bar setup
+        let pb = ProgressBar::new((scored_documents.len() * num_bands) as u64);
+        pb.set_style(
+            ProgressStyle::default_bar()
+                .template("{spinner:.green} [{elapsed_precise}] [{bar:40.cyan/blue}] {pos}/{len} ({eta})")
+                .progress_chars("#>-")
+        );
+        
+        let hashmaps: Vec<HashMap<usize, Vec<usize>>> = (0..num_bands)
+            .into_par_iter()
+            .map(|band| {
+                let mut band_map: HashMap<usize, Vec<usize>> = HashMap::new();
+                for (doc_id, vector) in scored_documents.iter().enumerate() {
+                    let hash = hash_band(&vector, band, r_seeds[band], c_seeds[band], b_seeds[band], &gamma, &uniform, micro);
+                    band_map.entry(hash).or_default().push(doc_id);
+                    pb.inc(1);
+                }
+                band_map
+            })
+            .collect();
+
+        pb.finish_with_message("Documents loaded.");
+
+        Self {
+            hashmaps,
             num_bands,
-            gamma: gamma.clone(),
-            uniform: uniform.clone(),
-            r_seeds: r_seeds.clone(),
-            c_seeds: c_seeds.clone(),
-            b_seeds: b_seeds.clone(),
+            gamma,
+            uniform,
+            r_seeds,
+            c_seeds,
+            b_seeds,
             micro,
-        };
-
-        scored_documents.iter().enumerate().for_each(|(doc_id, vector)| {
-            for band in 0..num_bands {
-                let hash = temp_lsh.hash_band(vector.clone(), band);
-                hashmaps[band].entry(hash).or_default().push(doc_id);
-            }
-        });
-
-        temp_lsh
-    }
-
-    fn hash_band(&self, vector: Vec<(usize, f32)>, band: usize) -> usize {
-
-        let t: Vec<(usize, f32)> = vector.iter().map(|&(index, weight)| {
-            let r_ij = gamma_sample(index, band as u32, self.r_seeds[band], &self.gamma);
-            let b_ij = uniform_sample(index, band as u32, self.b_seeds[band], &self.uniform);
-            let t_ij = ((weight.ln() / r_ij) + b_ij).floor();
-            (index, t_ij)
-        }).collect();
-
-        let y: Vec<(usize, f32)> = t.iter().map(|&(index, t_ij)| {
-            let b_ij = uniform_sample(index, band as u32, self.b_seeds[band], &self.uniform);
-            let r_ij = gamma_sample(index, band as u32, self.r_seeds[band], &self.gamma);
-
-            let y_ij = (r_ij * (t_ij - b_ij)).exp();
-            (index, y_ij)
-        }).collect();
-
-        let a: Vec<(usize, f32)> = y.iter().map(|&(index, y_ij)| {
-            let c_ij = gamma_sample(index, band as u32, self.c_seeds[band], &self.gamma);
-            let r_ij = gamma_sample(index, band as u32, self.r_seeds[band], &self.gamma);
-
-            let a_ij = c_ij / (y_ij * r_ij.exp());
-            (index, a_ij)
-        }).collect();
-
-        let min_index = a.iter().min_by(|a, b| a.1.partial_cmp(&b.1).unwrap()).map(|&(index, _)| index);
-        min_index.expect("At least one element should be present in the vector")
-    }
-
-    pub fn insert(self: &mut Self, vector: Vec<(usize, f32)>, doc_id: usize) {
-        for band in 0..self.num_bands {
-            let hash = self.hash_band(vector.clone(), band);
-            self.hashmaps[band]
-                .entry(hash)
-                .or_default()
-                .push(doc_id);
         }
     }
 
@@ -118,7 +116,7 @@ impl WeightedMinHashLSH {
         }
         let mut results = Vec::new();
         for band in 0..self.num_bands {
-            let hash_value = self.hash_band(vector.clone(), band);
+            let hash_value = hash_band(&vector, band, self.r_seeds[band], self.c_seeds[band], self.b_seeds[band], &self.gamma, &self.uniform, self.micro);
             if let Some(doc_ids) = self.hashmaps[band].get(&hash_value) {
                 results.extend(doc_ids.iter().cloned());
                 if self.micro {
