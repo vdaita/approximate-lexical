@@ -1,109 +1,15 @@
+mod weighted_lsh_searcher;
+mod random_proj;
+mod utils;
+
 use std::collections::{HashMap};
 use pyo3::prelude::*;
 use rand::rng;
 use rand_distr::{Distribution, StandardNormal};
-// --- Hashing and Indexing ---
+use crate::weighted_lsh_searcher::WeightedMinHashLSH;
+use crate::random_proj::{RandomProjTermCluster};
 
-fn hash_vector(vector: &[(usize, f32)], hash_proj: &[Vec<f32>]) -> u16 {
-    let mut hash: u16 = 0;
-    for (i, proj) in hash_proj.iter().enumerate() {
-        let mut score = 0.0;
-        for (idx, val) in vector.iter() {
-            score += proj[idx % proj.len()] * val;
-        }
-        if score > 0.0 {
-            hash |= 1 << i;
-        }
-    }
-    hash
-}
-
-// -- Weighted Minhash Sketching --- 
-
-#[pyclass]
-#[derive(Clone)]
-struct TermCluster {
-    hash_proj: Vec<Vec<f32>>,
-    hashes_to_documents: HashMap<u16, Vec<usize>>,
-}
-
-impl TermCluster {
-    fn new(documents: Vec<Vec<(usize, f32)>>, vocab_size: usize, micro: bool) -> Self {
-        if micro {
-            println!("[micro] TermCluster::new called with {} documents, vocab_size={}", documents.len(), vocab_size);
-        }
-        let hash_dim = 16;
-        let mut rng = rng();
-        let hash_proj: Vec<Vec<f32>> = (0..hash_dim)
-            .map(|_| {
-                (0..vocab_size)
-                    .map(|_| <StandardNormal as Distribution<f32>>::sample(&StandardNormal, &mut rng))
-                    .collect()
-            })
-            .collect();
-
-        let mut hashes_to_documents: HashMap<u16, Vec<usize>> = HashMap::new();
-        for (doc_idx, doc) in documents.iter().enumerate() {
-            let hash = hash_vector(doc, &hash_proj);
-            hashes_to_documents.entry(hash).or_default().push(doc_idx);
-            if micro && doc_idx < 5 {
-                println!("[micro] Document {} hashed to {}", doc_idx, hash);
-            }
-        }
-
-        Self {
-            hash_proj,
-            hashes_to_documents,
-        }
-    }
-
-    fn search(&self, query: &[(usize, f32)], top_k: usize, micro: bool) -> Vec<usize> {
-        if micro {
-            println!("[micro] TermCluster::search called with top_k={}", top_k);
-        }
-        let query_hash = hash_vector(query, &self.hash_proj);
-        if micro {
-            println!("[micro] Query hash: {}", query_hash);
-        }
-        // BFS Hamming search
-        let mut results = Vec::new();
-        for dist in 0..=16 {
-            if micro {
-                println!("[micro] Hamming distance: {}", dist);
-            }
-            let mut found = 0;
-            for hash in (0..=u16::MAX).filter(|h: &u16| hamming_distance(*h, query_hash) == dist) {
-                if let Some(docs) = self.hashes_to_documents.get(&hash) {
-                    results.extend(docs);
-                    found += docs.len();
-                    if micro {
-                        println!("[micro] Found {} docs at hash {} (dist {})", docs.len(), hash, dist);
-                    }
-                    if results.len() >= top_k {
-                        if micro {
-                            println!("[micro] Enough results found, returning.");
-                        }
-                        return results.into_iter().take(top_k).collect();
-                    }
-                }
-            }
-            if micro {
-                println!("[micro] Total found at dist {}: {}", dist, found);
-            }
-        }
-        if micro {
-            println!("[micro] Finished search, returning {} results.", results.len());
-        }
-        results.into_iter().take(top_k).collect()
-    }
-}
-
-fn hamming_distance(a: u16, b: u16) -> u32 {
-    (a ^ b).count_ones()
-}
-
-// --- Helper Functions ---
-
+// TODO: implement SimHash if Weighted MinHash isn't sufficient
 fn sparse_inner_product(query_vec: &[(usize, f32)], doc_vec: &[(usize, f32)]) -> f32 {
     let mut score = 0.0;
     let mut dv_idx = 0;
@@ -132,7 +38,8 @@ fn sparse_inner_product(query_vec: &[(usize, f32)], doc_vec: &[(usize, f32)]) ->
 #[pyclass]
 #[derive(Clone)]
 struct Index {
-    clusters: TermCluster,
+    lsh: WeightedMinHashLSH,
+    
     doc_list: Vec<Vec<(usize, f32)>>,
     vocab_size: usize,
     idf_weights: Vec<f32>
@@ -147,9 +54,16 @@ impl Index {
             .into_iter()
             .map(|tokens| convert_token_list_to_scored_list(tokens, &idf_weights))
             .collect();
-        let clusters = TermCluster::new(scored_documents.clone(), vocab_size, micro);
+        
+        let lsh = WeightedMinHashLSH::new(
+            &scored_documents,
+            8, // num_bands
+            42, // seed
+            micro
+        );
+
         Self {
-            clusters,
+            lsh,
             doc_list: scored_documents,
             idf_weights,
             vocab_size,
@@ -166,7 +80,7 @@ impl Index {
             println!("[micro] Index::search called");
         }
         let query_vec = convert_token_list_to_scored_list(tokenized_query, &self.idf_weights);
-        let candidates = self.clusters.search(&query_vec, top_k, micro); // Overfetch for better recall
+        let candidates = self.lsh.query(query_vec.clone());
         let mut scored: Vec<(usize, f32)> = candidates
             .iter()
             .map(|&doc_idx| {
