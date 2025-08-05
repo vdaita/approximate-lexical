@@ -4,10 +4,8 @@ mod utils;
 
 use std::collections::{HashMap};
 use pyo3::prelude::*;
-use rand::rng;
-use rand_distr::{Distribution, StandardNormal};
+use rand_distr::{Distribution};
 use crate::weighted_lsh_searcher::WeightedMinHashLSH;
-use crate::random_proj::{RandomProjTermCluster};
 
 // TODO: implement SimHash if Weighted MinHash isn't sufficient
 fn sparse_inner_product(query_vec: &[(usize, f32)], doc_vec: &[(usize, f32)]) -> f32 {

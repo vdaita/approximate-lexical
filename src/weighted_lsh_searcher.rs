@@ -1,7 +1,5 @@
 use std::collections::{HashMap};
 use rand_distr::{Distribution, Gamma, Uniform};
-use std::collections::hash_map::DefaultHasher;
-use std::hash::{Hash, Hasher};
 use rand::rngs::StdRng;
 use rand::{SeedableRng, Rng};
 
