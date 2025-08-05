@@ -74,9 +74,6 @@ impl WeightedMinHashLSH {
     }
 
     fn hash_band(&self, vector: Vec<(usize, f32)>, band: usize) -> usize {
-        if self.micro {
-            println!("[micro] WeightedMinHashLSH::hash called");
-        }
 
         let t: Vec<(usize, f32)> = vector.iter().map(|&(index, weight)| {
             let r_ij = gamma_sample(index, band as u32, self.r_seeds[band], &self.gamma);
