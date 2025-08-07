@@ -1,13 +1,16 @@
 mod weighted_lsh_searcher;
 mod random_proj;
 mod utils;
+mod compression;
+mod sample_searcher;
 
 use std::collections::{HashMap};
 use pyo3::prelude::*;
 use rand_distr::{Distribution};
 use crate::weighted_lsh_searcher::WeightedMinHashLSH;
+use crate::compression::compress_vector_alpha;
+use crate::sample_searcher::SampleSearcher;
 
-// TODO: implement SimHash if Weighted MinHash isn't sufficient
 fn sparse_inner_product(query_vec: &[(usize, f32)], doc_vec: &[(usize, f32)]) -> f32 {
     let mut score = 0.0;
     let mut dv_idx = 0;
@@ -40,18 +43,29 @@ struct Index {
     
     doc_list: Vec<Vec<(usize, f32)>>,
     vocab_size: usize,
-    idf_weights: Vec<f32>
+    idf_weights: Vec<f32>,
+
+    k1: f32,
+    b: f32,
+    compression_alpha: f32 // set to 1.0 to disable compression
 }
 
 impl Index {
-    fn build(tokenized_documents: Vec<Vec<usize>>, vocab_size: usize, idf_weights: Vec<f32>, micro: bool) -> Self {
+    fn build(tokenized_documents: Vec<Vec<usize>>, vocab_size: usize, idf_weights: Vec<f32>, k1: f32, b: f32, compression_alpha: f32, micro: bool) -> Self {
         if micro {
             println!("[micro] Index::build called");
         }
+
+        let average_doc_length = (tokenized_documents.iter().map(|doc| doc.len()).sum::<usize>() as f32) / (tokenized_documents.len() as f32);
+
         let scored_documents: Vec<Vec<(usize, f32)>> = tokenized_documents
             .into_iter()
-            .map(|tokens| convert_token_list_to_scored_list(tokens, &idf_weights))
+            .map(|tokens| convert_document_list_to_scored_list(tokens, &idf_weights, k1, b, average_doc_length))
             .collect();
+        let scored_documents = scored_documents
+            .into_iter()
+            .map(|doc| compress_vector_alpha(&doc, compression_alpha))
+            .collect::<Vec<Vec<(usize, f32)>>>();
         
         let lsh = WeightedMinHashLSH::new(
             &scored_documents,
@@ -65,6 +79,9 @@ impl Index {
             doc_list: scored_documents,
             idf_weights,
             vocab_size,
+            k1,
+            b,
+            compression_alpha
         }
     }
 
@@ -77,7 +94,7 @@ impl Index {
         if micro {
             println!("[micro] Index::search called");
         }
-        let query_vec = convert_token_list_to_scored_list(tokenized_query, &self.idf_weights);
+        let query_vec = convert_query_list_to_scored_list(tokenized_query, &self.idf_weights);
         let candidates = self.lsh.query(query_vec.clone());
         let mut scored: Vec<(usize, f32)> = candidates
             .iter()
@@ -101,24 +118,33 @@ impl Index {
 }
 
 // --- Data Preprocessing ---
-fn convert_token_list_to_scored_list(tokenized_string: Vec<usize>, idf_scores: &[f32]) -> Vec<(usize, f32)>{
+fn convert_document_list_to_scored_list(tokenized_string: Vec<usize>, idf_scores: &[f32], k1: f32, b: f32, average_doc_length: usize) -> Vec<(usize, f32)>{
     let token_counts = tokenized_string.iter().fold(HashMap::new(), |mut acc, &token| {
         *acc.entry(token as usize).or_insert(0) += 1;
         acc
     });
+    let total_tokens = tokenized_string.len();
     let scored_list = token_counts.iter()
         .map(|(&token, &count)| {
             let idf = idf_scores.get(token).cloned().unwrap_or(0.0);
-            (token, count as f32 * idf)
+            let score = idf * ((count as f32) * (k1 + 1.0)) / ((count as f32) + k1 * (1.0 - b + b * ((total_tokens as f32) / (average_doc_length as f32))));
+            (token, score)
         })
         .collect::<Vec<(usize, f32)>>();
 
+    scored_list;
+}
 
-    let weights_sum = scored_list.iter().map(|&(_, weight)| weight).sum::<f32>();
-    let normalized_weights: Vec<(usize, f32)> = scored_list.iter()
-        .map(|&(index, weight)| (index, weight / weights_sum))
-        .collect();
-    normalized_weights
+fn convert_query_list_to_scored_list(tokenized_string: Vec<usize>) -> Vec<usize> {
+    let token_counts = tokenized_string.iter().fold(HashMap::new(), |mut acc, &token| {
+        *acc.entry(token as usize).or_insert(0) += 1;
+        acc
+    });
+    let count_list = token_counts.iter()
+        .map(|(&token, &count)| (token, count as f32))
+        .collect::<Vec<(usize, f32)>>();
+
+    count_list
 }
 
 // --- Python Bindings ---
@@ -127,10 +153,21 @@ fn build_approx_index(
     documents: Vec<Vec<usize>>,
     vocab_size: usize,
     idf_weights: Vec<f32>,
+    k1: f32,
+    b: f32,
+    compression_alpha: f32
     micro: bool
 ) -> PyResult<Index> {
-    println!("[al-rust] Building approximate index with {} documents, vocab_size={}, micro={}", documents.len(), vocab_size, micro);
-    Ok(Index::build(documents, vocab_size, idf_weights, micro))
+    println!(
+        "[al-rust] Building approximate index with {} documents, vocab_size={}, k1={}, b={}, compression_alpha={}, micro={}",
+        documents.len(),
+        vocab_size,
+        k1,
+        b,
+        compression_alpha,
+        micro
+    );
+    Ok(Index::build(documents, vocab_size, idf_weights, k1, b, compression_alpha, micro))
 }
 
 #[pyfunction]
