@@ -3,7 +3,7 @@ use rand_distr::{Distribution, Gamma, Uniform};
 use indicatif::{ProgressBar, ProgressStyle};
 use rayon::prelude::*;
 use rand::prelude::*;
-use rand::distributions::WeightedIndex;
+use rand::thread_rng;
 
 #[derive(Debug, Clone)]
 pub struct SampleSearcher {
@@ -16,10 +16,10 @@ impl SampleSearcher {
         println!("[SampleSearcher] SampleSearcher::new called with {} documents, micro = {}", documents.len(), micro);
 
         let pb = ProgressBar::new(documents.len() as u64);
-        pb.set_style(ProgressStyle::default_bar()
+        let style = ProgressStyle::default_bar()
             .template("{spinner:.green} [{elapsed_precise}] [{bar:40.cyan/blue}] {pos}/{len} {msg}")
-            .unwrap()
-            .progress_chars("#>-"));
+            .progress_chars("#>-");
+        pb.set_style(style);
 
         let mut weight_map: HashMap<usize, Vec<(usize, f32)>> = HashMap::new();
         for (doc_idx, doc) in documents.iter().enumerate() {
@@ -45,13 +45,13 @@ impl SampleSearcher {
     }
 
     pub fn search(&self, query: &[(usize, u32)], top_k: usize, B: usize, num_threads: usize) -> Vec<usize> { 
-        if micro { 
+        if self.micro { 
             println!("[SampleSearcher] SampleSearcher::search called with top_k = {}", top_k);
         }
         let mut results = Vec::new();
-        let query_weighed_index = WeightedIndex::new(query.iter().map(|&(_, weight)| weight as f32)).unwrap();
+        let query_weighted_index = WeightedIndex::new(query.iter().map(|&(_, weight)| weight as f32)).unwrap();
 
-        let local_hashmaps: Vec<HashMap<usize, usize>> = (0..num_threads).into_par_iter().for_each(|_| {
+        let local_hashmaps: Vec<HashMap<usize, usize>> = (0..num_threads).into_par_iter().map(|_| {
             let mut local_results = HashMap::new();
             let mut rng = thread_rng();
 
@@ -65,7 +65,7 @@ impl SampleSearcher {
             }
 
             local_results
-        });
+        }).collect();
 
         let mut global_results = HashMap::new();
         for local in local_hashmaps {

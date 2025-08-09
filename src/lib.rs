@@ -11,6 +11,9 @@ use crate::weighted_lsh_searcher::WeightedMinHashLSH;
 use crate::compression::compress_vector_alpha;
 use crate::sample_searcher::SampleSearcher;
 
+// we want the query to be weighted by the IDF scores
+// we want the documents to have the rest of the BM25 formula
+
 fn sparse_inner_product(query_vec: &[(usize, f32)], doc_vec: &[(usize, f32)]) -> f32 {
     let mut score = 0.0;
     let mut dv_idx = 0;
@@ -60,7 +63,7 @@ impl Index {
 
         let scored_documents: Vec<Vec<(usize, f32)>> = tokenized_documents
             .into_iter()
-            .map(|tokens| convert_document_list_to_scored_list(tokens, &idf_weights, k1, b, average_doc_length))
+            .map(|tokens| convert_document_list_to_scored_list(tokens, k1, b, average_doc_length))
             .collect();
         let scored_documents = scored_documents
             .into_iter()
@@ -118,7 +121,7 @@ impl Index {
 }
 
 // --- Data Preprocessing ---
-fn convert_document_list_to_scored_list(tokenized_string: Vec<usize>, idf_scores: &[f32], k1: f32, b: f32, average_doc_length: usize) -> Vec<(usize, f32)>{
+fn convert_document_list_to_scored_list(tokenized_string: Vec<usize>, k1: f32, b: f32, average_doc_length: f32) -> Vec<(usize, f32)>{
     let token_counts = tokenized_string.iter().fold(HashMap::new(), |mut acc, &token| {
         *acc.entry(token as usize).or_insert(0) += 1;
         acc
@@ -126,24 +129,22 @@ fn convert_document_list_to_scored_list(tokenized_string: Vec<usize>, idf_scores
     let total_tokens = tokenized_string.len();
     let scored_list = token_counts.iter()
         .map(|(&token, &count)| {
-            let idf = idf_scores.get(token).cloned().unwrap_or(0.0);
-            let score = idf * ((count as f32) * (k1 + 1.0)) / ((count as f32) + k1 * (1.0 - b + b * ((total_tokens as f32) / (average_doc_length as f32))));
+            let score = ((count as f32) * (k1 + 1.0)) / ((count as f32) + k1 * (1.0 - b + b * ((total_tokens as f32) / (average_doc_length as f32))));
             (token, score)
         })
         .collect::<Vec<(usize, f32)>>();
 
-    scored_list;
+    scored_list
 }
 
-fn convert_query_list_to_scored_list(tokenized_string: Vec<usize>) -> Vec<usize> {
+fn convert_query_list_to_scored_list(tokenized_string: Vec<usize>, idf_scores: &[f32]) -> Vec<(usize, f32)> {
     let token_counts = tokenized_string.iter().fold(HashMap::new(), |mut acc, &token| {
         *acc.entry(token as usize).or_insert(0) += 1;
         acc
     });
     let count_list = token_counts.iter()
-        .map(|(&token, &count)| (token, count as f32))
+        .map(|(&token, &count)| (token, idf_scores[token] * count as f32))
         .collect::<Vec<(usize, f32)>>();
-
     count_list
 }
 
@@ -155,7 +156,7 @@ fn build_approx_index(
     idf_weights: Vec<f32>,
     k1: f32,
     b: f32,
-    compression_alpha: f32
+    compression_alpha: f32,
     micro: bool
 ) -> PyResult<Index> {
     println!(
