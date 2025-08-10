@@ -1,9 +1,9 @@
 use std::collections::{HashMap};
-use rand_distr::{Distribution, Gamma, Uniform};
 use indicatif::{ProgressBar, ProgressStyle};
 use rayon::prelude::*;
-use rand::prelude::*;
+use rand::distr::weighted::WeightedIndex;
 use rand::thread_rng;
+use rand::distr::Distribution;
 
 #[derive(Debug, Clone)]
 pub struct SampleSearcher {
@@ -48,7 +48,6 @@ impl SampleSearcher {
         if self.micro { 
             println!("[SampleSearcher] SampleSearcher::search called with top_k = {}", top_k);
         }
-        let mut results = Vec::new();
         let query_weighted_index = WeightedIndex::new(query.iter().map(|&(_, weight)| weight as f32)).unwrap();
 
         let local_hashmaps: Vec<HashMap<usize, usize>> = (0..num_threads).into_par_iter().map(|_| {
