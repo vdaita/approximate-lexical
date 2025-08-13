@@ -1,0 +1,16 @@
+TODO:
+- implement TermIndex
+    - take input vectors and use KMeans to cluster
+    - segment the clusters into num_cluster_segments
+    - write query method
+- implement GlobalIndex
+    - process input vectors and put into term_indices
+    - make sure new types are implemented within weighted_top_k_lists and are passed around
+    - use alpha_significance_compression
+    - expose everything through the Parameters class
+- implement main.py
+    - load data from BM25s's sample datasets
+    - benchmark against BM25s in memory
+    
+Later TODO:
+- use mmapping and benchmark
