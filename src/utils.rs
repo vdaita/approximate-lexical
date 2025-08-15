@@ -41,17 +41,60 @@ pub struct ClusterSegment<'a> {
     pub segment_id: usize,
     pub segment: &'a Vec<(usize, f32)>
 }
-
-#[derive(Debug, Clone, Ord, ParialOrd)]
+#[derive(Debug, Clone, PartialEq, PartialOrd, Eq, Ord)]
 pub struct IndexHeapEntry {
-    pub index: usize,
-    pub score: f32,
+    pub doc_id: Reverse<usize>,
+    pub score: OrderedFloat<f32>,
     pub cluster_id: usize,
-    pub segment_id: usize
+    pub segment_index: usize
 }
 
-impl Ord for IndexHeapEntry {
-    fn cmp(&self, other: &Self) -> std::cmp::Ordering {
-        self.score.partial_cmp(&other.score).unwrap_or(std::cmp::Ordering::Equal)
+impl IndexHeapEntry {
+    pub fn new(doc_id: usize, score: f32, cluster_id: usize, segment_index: usize) -> Self {
+        IndexHeapEntry {
+            doc_id: Reverse(doc_id),
+            score: OrderedFloat(score),
+            cluster_id,
+            segment_index // describes where in the segment you currently are
+        }
+    }
+
+    pub fn score(&self) -> f32 {
+        self.score.into_inner()
+    }
+
+    pub fn doc_id(&self) -> usize {
+        self.doc_id.0
+    }
+
+    pub fn cluster_id(&self) -> usize {
+        self.cluster_id
+    }
+    
+    pub fn segment_index(&self) -> usize {
+        self.segment_index
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, PartialOrd, Eq, Ord)]
+pub struct ScoreHeapEntry {
+    pub score: OrderedFloat<f32>,
+    pub doc_id: usize
+}
+
+impl ScoreHeapEntry {
+    pub fn new(doc_id: usize, score: f32) -> Self {
+        ScoreHeapEntry {
+            doc_id,
+            score: OrderedFloat(score)
+        }
+    }
+
+    pub fn score(&self) -> f32 {
+        self.score.into_inner()
+    }
+
+    pub fn doc_id(&self) -> usize {
+        self.doc_id
     }
 }

@@ -1,6 +1,8 @@
 use ndarray::{Array2, Axis};
 use rand::thread_rng;
 use rand_distr::{Normal, Distribution};
+use rayon::iter::IntoParallelRefIterator;
+use rayon::prelude::*;
 
 pub struct SparseToDense {
     random_matrix: Array2<f32>, // Now using f32 for Gaussian
@@ -28,5 +30,9 @@ impl SparseToDense {
             }
         }
         result
+    }
+    
+    pub fn project_multiple(&self, vector: &Vec<Vec<(usize, f32)>>) -> Vec<Vec<f32>> {
+        vector.par_iter().map(|v| self.project(v)).collect()
     }
 }
