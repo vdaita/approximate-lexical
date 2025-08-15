@@ -20,15 +20,50 @@ pub fn alpha_significance_compression(data: &Vec<(usize, f32)>, alpha_threshold:
 }
 
 #[derive(Debug, Clone)]
+#[pyo3::pyclass]
 pub struct ApproximateLexicalParameters {
+    #[pyo3(get, set)]
     pub num_clusters: usize, 
+    #[pyo3(get, set)]
     pub dense_dim_size: usize,
+    #[pyo3(get, set)]
     pub kmeanspp_sample: usize,
+    #[pyo3(get, set)]
     pub kmeans_iterations: usize,
+    #[pyo3(get, set)]
     pub batch_size: usize,
+    #[pyo3(get, set)]
     pub spherical: bool,
+    #[pyo3(get, set)]
     pub num_cluster_segments: usize,
+    #[pyo3(get, set)]
     pub alpha_significance_threshold: f32,
+}
+
+#[pyo3::pymethods]
+impl ApproximateLexicalParameters {
+    #[new]
+    pub fn new(
+        num_clusters: usize,
+        dense_dim_size: usize,
+        kmeanspp_sample: usize,
+        kmeans_iterations: usize,
+        batch_size: usize,
+        spherical: bool,
+        num_cluster_segments: usize,
+        alpha_significance_threshold: f32,
+    ) -> Self {
+        ApproximateLexicalParameters {
+            num_clusters,
+            dense_dim_size,
+            kmeanspp_sample,
+            kmeans_iterations,
+            batch_size,
+            spherical,
+            num_cluster_segments,
+            alpha_significance_threshold,
+        }
+    }
 }
 
 pub struct SegmentedCluster {

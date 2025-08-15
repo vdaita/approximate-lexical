@@ -1,6 +1,7 @@
-use ::rayon::prelude::*;
-use ::std::collections::{BinaryHeap, HashMap};
-use ::std::sync::Arc;
+use::rayon::prelude::*;
+use::std::collections::{BinaryHeap, HashMap};
+use::std::sync::Arc;
+use::pyo3::prelude::*;
 
 use crate::sparse_to_dense::SparseToDense;
 use crate::term_index::TermIndex;
@@ -9,6 +10,7 @@ use crate::utils::{
     ScoreHeapEntry, SegmentedCluster,
 };
 
+#[pyclass]
 pub struct GlobalIndex {
     term_indices: Vec<TermIndex>,
     projector: Arc<SparseToDense>,
