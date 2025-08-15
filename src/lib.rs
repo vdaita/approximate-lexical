@@ -4,4 +4,3 @@ mod term_index;
 mod utils;
 mod kmeans;
 
-use ndarray::Array2;
