@@ -1,25 +1,25 @@
 mod global_index;
+mod kmeans;
 mod sparse_to_dense;
 mod term_index;
 mod utils;
-mod kmeans;
 
-use serde_json;
+pub use crate::global_index::GlobalIndex;
+pub use crate::utils::ApproximateLexicalParameters;
 use pyo3::prelude::*;
-use crate::utils::ApproximateLexicalParameters;
-use crate::global_index::GlobalIndex;
+use serde_json;
 
 #[pyfunction]
-fn build_approx_index(
+pub fn build_approx_index(
     data: Vec<Vec<(usize, f32)>>,
-    parameters: ApproximateLexicalParameters
+    parameters: ApproximateLexicalParameters,
 ) -> PyResult<GlobalIndex> {
     let index = GlobalIndex::new(data, parameters);
     Ok(index)
 }
 
 #[pyfunction]
-fn query_approx_index(
+pub fn query_approx_index(
     global_index: &GlobalIndex,
     query: Vec<(usize, f32)>,
     num_clusters: usize,
@@ -30,33 +30,33 @@ fn query_approx_index(
 }
 
 #[pyfunction]
-fn save_approx_index_to_file(
-    global_index: &GlobalIndex,
-    file_path: String,
-) -> PyResult<()> {
-    let serialized = serde_json::to_string(global_index)
-        .map_err(|e| PyErr::new::<pyo3::exceptions::PyIOError, _>(format!("Serialization error: {}", e)))?;
+pub fn save_approx_index_to_file(global_index: &GlobalIndex, file_path: String) -> PyResult<()> {
+    let serialized = serde_json::to_string(global_index).map_err(|e| {
+        PyErr::new::<pyo3::exceptions::PyIOError, _>(format!("Serialization error: {}", e))
+    })?;
     std::fs::write(file_path, serialized);
     Ok(())
 }
 
 #[pyfunction]
-fn load_approx_index_from_file(file_path: String) -> PyResult<GlobalIndex> {
-    let serialized = std::fs::read_to_string(file_path)
-        .map_err(|e| PyErr::new::<pyo3::exceptions::PyIOError, _>(format!("File read error: {}", e)))?;
-    let index: GlobalIndex = serde_json::from_str(&serialized)
-        .map_err(|e| PyErr::new::<pyo3::exceptions::PyValueError, _>(format!("Deserialization error: {}", e)))?;
+pub fn load_approx_index_from_file(file_path: String) -> PyResult<GlobalIndex> {
+    let serialized = std::fs::read_to_string(file_path).map_err(|e| {
+        PyErr::new::<pyo3::exceptions::PyIOError, _>(format!("File read error: {}", e))
+    })?;
+    let index: GlobalIndex = serde_json::from_str(&serialized).map_err(|e| {
+        PyErr::new::<pyo3::exceptions::PyValueError, _>(format!("Deserialization error: {}", e))
+    })?;
     Ok(index)
 }
 
 #[pymodule]
-fn approximate_lexical(py: Python, m: &Bound<'_, PyModule>) -> PyResult<()> {
+pub fn approximate_lexical(py: Python, m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_class::<ApproximateLexicalParameters>()?;
     m.add_function(wrap_pyfunction!(build_approx_index, m)?)?;
     m.add_function(wrap_pyfunction!(query_approx_index, m)?)?;
     m.add_function(wrap_pyfunction!(save_approx_index_to_file, m)?)?;
     m.add_function(wrap_pyfunction!(load_approx_index_from_file, m)?);
-    
+
     // Register other classes and functions as needed
     Ok(())
 }
