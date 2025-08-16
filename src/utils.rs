@@ -1,6 +1,7 @@
 use ordered_float::OrderedFloat;
 use std::sync::Arc;
 use serde::{Serialize, Deserialize};
+use std::cmp::Reverse;
 
 // alpha-significance to reduce size of posting lists
 pub fn alpha_significance_compression(
@@ -22,7 +23,7 @@ pub fn alpha_significance_compression(
     compressed
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 #[pyo3::pyclass]
 pub struct ApproximateLexicalParameters {
     #[pyo3(get, set)]

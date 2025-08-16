@@ -3,7 +3,6 @@ name = "approximate-lexical"
 version = "0.1.0"
 edition = "2021"
 
-# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 [lib]
 name = "approximate_lexical"
 crate-type = ["cdylib"]
@@ -17,7 +16,7 @@ rand_distr = "0.5.1"
 indicatif = "0.7"
 rayon = "1.10.0"
 distances = "1.8.0"
-ordered-float = "5.0.0"
-bm25 = "2.3.1"
-serde = { "1.0.219", features=["derive", "rc"] }
+ordered-float = { version = "5.0.0", features = ["serde"] }
+bm25 = { version = "2.3.1", features = ["parallelism"] }
+serde = { version = "1.0.219", features = ["derive", "rc"] }
 serde_json = "1.0.142"
