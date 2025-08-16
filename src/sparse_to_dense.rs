@@ -3,7 +3,9 @@ use rand::thread_rng;
 use rand_distr::{Normal, Distribution};
 use rayon::iter::IntoParallelRefIterator;
 use rayon::prelude::*;
+use serde::{Deserialize, Serialize};
 
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct SparseToDense {
     random_matrix: Array2<f32>, // Now using f32 for Gaussian
 }

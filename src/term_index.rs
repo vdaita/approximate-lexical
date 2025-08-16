@@ -4,7 +4,9 @@ use crate::utils::{ApproximateLexicalParameters, ClusterSegment, SegmentedCluste
 use crate::kmeans::{MiniBatchKMeansResult, create_kmeans};
 use std::sync::Arc;
 use rayon::prelude::*;
+use serde::{Serialize, Deserialize};
 
+#[derive(Serialize, Deserialize, Debug, Clone)]
 pub struct TermIndex {
     dense_centroids: Vec<Vec<f32>>,
     segmented_clusters: Vec<SegmentedCluster>,

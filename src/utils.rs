@@ -70,7 +70,7 @@ impl ApproximateLexicalParameters {
     }
 }
 
-#[derive(Serialize, Deserialize, Debug)]
+#[derive(Serialize, Deserialize, Debug, Clone)]
 pub struct SegmentedCluster {
     pub cluster_id: usize,
     pub term_id: usize,
@@ -78,7 +78,7 @@ pub struct SegmentedCluster {
     pub segments: Arc<Vec<ClusterSegment>>,
 }
 
-#[derive(Serialize, Deserialize, Debug)]
+#[derive(Serialize, Deserialize, Debug, Clone)]
 pub struct ClusterSegment {
     pub cluster_id: usize,
     pub term_id: usize,
