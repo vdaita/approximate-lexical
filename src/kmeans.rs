@@ -1,5 +1,7 @@
 use distances::vectors::{euclidean, euclidean_sq};
 use rand::prelude::IndexedRandom;
+use indicatif::ProgressBar;
+use indicatif::ProgressIterator;
 use rayon::prelude::*;
 
 use crate::ApproximateLexicalParameters;
@@ -18,6 +20,9 @@ pub fn create_kmeans(
     let mut centroids: Vec<Vec<f32>> = Vec::with_capacity(parameters.num_clusters);
     let mut rng = rand::rng();
 
+    let bar = ProgressBar::new(parameters.num_clusters as u64);
+    bar.set_message("Initializing KMeans++ centroids");
+    
     if let Some(first) = data.choose(&mut rng) {
         centroids.push(first.clone());
         while centroids.len() < parameters.num_clusters {
@@ -48,11 +53,15 @@ pub fn create_kmeans(
                     break;
                 }
             }
+            
+            bar.inc(1);
         }
     }
+    
+    bar.finish();
 
     // use minibatch kmeans to assign clusters and refine centroids
-    for _iter in 0..parameters.kmeans_iterations {
+    for _iter in (0..parameters.kmeans_iterations).progress() {
         let batch_dataset: Vec<&Vec<f32>> = data
             .choose_multiple(&mut rng, parameters.kmeans_batch_size)
             .collect();
