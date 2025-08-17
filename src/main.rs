@@ -1,4 +1,4 @@
-use bm25::{EmbedderBuilder, Embedding, Language, SearchEngineBuilder, SearchResult};
+use bm25::{EmbedderBuilder, Embedding, Language, SearchEngineBuilder, SearchResult, Document, ScoredDocument, Scorer};
 use clap::Parser;
 use serde::Deserialize;
 use std::fs::File;
@@ -52,14 +52,16 @@ fn main() {
         .iter()
         .map(|doc| embedder.embed(doc))
         .collect::<Vec<_>>();
-    let _embedded_queries = queries_refs
+    let embedded_queries = queries_refs
         .iter()
         .map(|query| embedder.embed(query))
         .collect::<Vec<_>>();
-
-    let search_engine =
-        SearchEngineBuilder::<u32>::with_corpus(Language::English, document_refs).build();
-
+    
+    let mut scorer = Scorer::<usize>::new();
+    for (i, embedded_document) in embedded_documents.iter().enumerate() {
+        scorer.upsert(&i, embedded_document.clone());
+    }
+    
     // Build approximate search engine with default parameters
     let approx_params = ApproximateLexicalParameters::new(
         128,   // num_clusters
@@ -101,7 +103,15 @@ fn main() {
             .collect::<Vec<(usize, f32)>>();
 
         let regular_start_time = Instant::now();
-        let original_results: Vec<SearchResult<u32>> = search_engine.search(&query, args.top_k);
+        let mut original_results: Vec<ScoredDocument<usize>> = scorer
+            .matches(&query_embedding)
+            .into_iter()
+            .collect();
+        original_results.sort_by(|a, b| b.score.partial_cmp(&a.score).unwrap());
+        let original_results: Vec<ScoredDocument<usize>> = original_results
+            .into_iter()
+            .take(args.top_k)
+            .collect();
         let regular_end_time = Instant::now();
 
         for &m in &m_values {
@@ -126,7 +136,7 @@ fn main() {
 
             let original_doc_ids: std::collections::HashSet<u32> = original_results
                 .iter()
-                .map(|result| result.document.id)
+                .map(|result| result.id as u32)
                 .collect();
             let approx_doc_ids: std::collections::HashSet<u32> =
                 approx_top_k.iter().cloned().collect();
