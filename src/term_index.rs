@@ -1,7 +1,7 @@
 use crate::sparse_to_dense::SparseToDense;
 use std::collections::HashMap;
 use crate::utils::{ApproximateLexicalParameters, ClusterSegment, SegmentedCluster};
-use crate::kmeans::{MiniBatchKMeansResult, create_kmeans};
+use crate::kmeans::{create_kmeans};
 use std::sync::Arc;
 use rayon::prelude::*;
 use serde::{Serialize, Deserialize};
@@ -27,7 +27,7 @@ impl TermIndex {
         );
         
         let centroids = kmeans_result.centroids;
-        let mut segmented_clusters: Vec<SegmentedCluster> = kmeans_result.cluster_assignments
+        let segmented_clusters: Vec<SegmentedCluster> = kmeans_result.cluster_assignments
             .into_iter()
             .enumerate()
             .map(|(cluster_id, segment_ids)| {

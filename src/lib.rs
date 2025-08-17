@@ -34,8 +34,10 @@ pub fn save_approx_index_to_file(global_index: &GlobalIndex, file_path: String) 
     let serialized = serde_json::to_string(global_index).map_err(|e| {
         PyErr::new::<pyo3::exceptions::PyIOError, _>(format!("Serialization error: {}", e))
     })?;
-    std::fs::write(file_path, serialized);
-    Ok(())
+
+    std::fs::write(file_path, serialized).map_err(|e| {
+        PyErr::new::<pyo3::exceptions::PyIOError, _>(format!("File write error: {}", e))
+    })
 }
 
 #[pyfunction]
@@ -50,12 +52,12 @@ pub fn load_approx_index_from_file(file_path: String) -> PyResult<GlobalIndex> {
 }
 
 #[pymodule]
-pub fn approximate_lexical(py: Python, m: &Bound<'_, PyModule>) -> PyResult<()> {
+pub fn approximate_lexical(_py: Python, m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_class::<ApproximateLexicalParameters>()?;
     m.add_function(wrap_pyfunction!(build_approx_index, m)?)?;
     m.add_function(wrap_pyfunction!(query_approx_index, m)?)?;
     m.add_function(wrap_pyfunction!(save_approx_index_to_file, m)?)?;
-    m.add_function(wrap_pyfunction!(load_approx_index_from_file, m)?);
+    m.add_function(wrap_pyfunction!(load_approx_index_from_file, m)?)?;
 
     // Register other classes and functions as needed
     Ok(())

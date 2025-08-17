@@ -38,7 +38,7 @@ pub fn create_kmeans(
             let threshold = rand::random::<f32>() * total_distance;
             let mut cumulative: f32 = 0.0f32;
             
-            for (point, &dist) in sampled_points.iter().zip(sampled_distances.iter()) {
+            for (&point, &dist) in sampled_points.iter().zip(sampled_distances.iter()) {
                 cumulative += dist;  // dist is now f32, not &f32
                 if cumulative >= threshold {
                     centroids.push(point.clone().to_vec());
@@ -49,7 +49,7 @@ pub fn create_kmeans(
     }
 
     // use minibatch kmeans to assign clusters and refine centroids
-    for iter in 0..kmeans_iterations {
+    for _iter in 0..kmeans_iterations {
         let batch_dataset: Vec<&Vec<f32>> = data.choose_multiple(&mut rng, batch_size).collect();
         let distances = batch_dataset
             .par_iter()

@@ -1,7 +1,6 @@
 use bm25::{EmbedderBuilder, Embedding, Language, SearchEngineBuilder, SearchResult};
 use clap::Parser;
 use serde::Deserialize;
-
 use std::fs::File;
 use std::io::BufReader;
 use std::time::Instant;

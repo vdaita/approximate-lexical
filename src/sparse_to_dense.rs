@@ -1,5 +1,5 @@
-use ndarray::{Array2, Axis};
-use rand::thread_rng;
+use ndarray::{Array2};
+use rand::rng;
 use rand_distr::{Normal, Distribution};
 use rayon::iter::IntoParallelRefIterator;
 use rayon::prelude::*;
@@ -12,7 +12,7 @@ pub struct SparseToDense {
 
 impl SparseToDense {
     pub fn new(max_vocab_size: usize, target_dim: usize) -> Self {
-        let mut rng = thread_rng();
+        let mut rng = rng();
         let normal = Normal::new(0.0, 1.0).unwrap();
         let random_matrix = Array2::from_shape_fn((max_vocab_size, target_dim), |_| {
             normal.sample(&mut rng) as f32
