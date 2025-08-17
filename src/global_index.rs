@@ -12,28 +12,30 @@ use crate::utils::{
 
 #[derive(Serialize, Deserialize)]
 pub struct GlobalIndex {
-    term_indices: Vec<TermIndex>,
+    term_indices: HashMap<usize, TermIndex>,
     projector: Arc<SparseToDense>,
     parameters: ApproximateLexicalParameters,
 }
 
 impl GlobalIndex {
     pub fn new(data: Vec<Vec<(usize, f32)>>, parameters: ApproximateLexicalParameters) -> Self {
-        let max_term_index = data
-            .par_iter()
-            .flat_map_iter(|doc| doc.iter().map(|&(term, _)| term))
-            .max()
-            .unwrap_or(0);
-        
+        let unique_terms = data
+            .iter()
+            .flat_map(|doc| doc.iter().map(|&(term, _)| term))
+            .collect::<std::collections::HashSet<usize>>();
+
+        let unique_terms_map: HashMap<usize, usize> = unique_terms
+            .into_iter()
+            .enumerate()
+            .map(|(index, term)| (term, index))
+            .collect();
+                
         let projector = Arc::new(SparseToDense::new(
-            max_term_index,
+            unique_terms_map.clone(),
             parameters.dense_dim_size
         ));
         
-
-        if max_term_index == 0 {
-            println!("[GlobalIndex] no terms found in the data.");
-        }
+        println!("[GlobalIndex] finished creating SparseToDense projector with {} terms and {} dimensions.", unique_terms_map.len(), parameters.dense_dim_size);
 
         let approximated_documents: Vec<Vec<(usize, f32)>> = data
             .into_par_iter()
@@ -42,23 +44,26 @@ impl GlobalIndex {
             })
             .collect();
 
-        let term_indices: Vec<TermIndex> = (0..max_term_index)
+        let term_indices: HashMap<usize, TermIndex> = unique_terms_map
             .into_par_iter()
-            .map(|term_index| {
+            .map(|(_, term_id)| {
                 let term_documents: Vec<Vec<(usize, f32)>> = approximated_documents
                     .par_iter()
                     .filter_map(|doc| {
                         doc.iter()
-                            .find(|&&(t, _)| t == term_index)
+                            .find(|&&(t, _)| t == term_id)
                             .map(|&(t, v)| vec![(t, v)]) // Collect only the term and its value
                     })
                     .collect();
-                TermIndex::new(
-                    term_index,
+                
+                let term_index = TermIndex::new(
+                    term_id,
                     &term_documents,
                     projector.clone(),
                     parameters.clone(),
-                )
+                );
+                
+                (term_id, term_index)
             })
             .collect();
 
@@ -158,9 +163,13 @@ impl GlobalIndex {
             .collect::<Vec<(usize, f32)>>();
         let top_k_segmented_clusters: Vec<&SegmentedCluster> = normalized_query
             .par_iter()
-            .map(|&(term_index, weight)| {
+            .map(|&(term_id, weight)| {
                 let num_clusters = ((weight * (top_k_clusters as f32)).floor()) as usize;
-                self.term_indices[term_index]
+                let Some(term_index) = self.term_indices.get(&term_id) else {
+                    println!("Term ID {} not found in term indices", term_id);
+                    return vec![];
+                };
+                term_index
                     .get_segmented_clusters(&projected_vector, num_clusters)
             })
             .flatten_iter()

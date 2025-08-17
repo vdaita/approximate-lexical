@@ -7,7 +7,6 @@ mod utils;
 pub use crate::global_index::GlobalIndex;
 pub use crate::utils::ApproximateLexicalParameters;
 // use pyo3::prelude::*;
-use serde_json;
 
 // #[pyfunction]
 // pub fn build_approx_index(

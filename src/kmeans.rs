@@ -59,6 +59,7 @@ pub fn create_kmeans(
     }
     
     bar.finish();
+    println!("KMeans++ centroid generation completed.");
 
     // use minibatch kmeans to assign clusters and refine centroids
     for _iter in (0..parameters.kmeans_iterations).progress() {
