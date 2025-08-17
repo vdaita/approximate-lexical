@@ -18,12 +18,7 @@ impl TermIndex {
         let projected_documents = projector.project_multiple(documents);
         let kmeans_result = create_kmeans(
             &projected_documents, 
-            parameters.num_clusters, 
-            parameters.dense_dim_size, 
-            parameters.kmeanspp_sample, 
-            parameters.kmeans_iterations, 
-            parameters.batch_size,
-            parameters.spherical
+            &parameters
         );
         
         let centroids = kmeans_result.centroids;

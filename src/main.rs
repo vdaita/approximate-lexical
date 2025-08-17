@@ -33,12 +33,14 @@ struct Args {
 fn main() {
     let args = Args::parse();
     let dataset_path = format!("data/{}.json", args.dataset_source);
-    let file = File::open(dataset_path).expect("Unable to open dataset file");
+    let file = File::open(dataset_path.clone()).expect("Unable to open dataset file");
     let reader = BufReader::new(file);
 
     let dataset: DataSet = serde_json::from_reader(reader).expect("JSON was not well-formatted");
     let documents: Vec<String> = dataset.documents;
     let queries: Vec<String> = dataset.queries;
+    
+    println!("Read {} documents and {} queries from {}", documents.len(), queries.len(), dataset_path.clone());
 
     let document_refs: Vec<&str> = documents.iter().map(|s| s.as_str()).collect();
     let queries_refs: Vec<&str> = queries.iter().map(|s| s.as_str()).collect();
@@ -64,7 +66,7 @@ fn main() {
         256,   // dense_dim_size
         100,   // kmeanspp_sample
         10,    // kmeans_iterations
-        1000,  // batch_size
+        1000,  // kmeans_batch_size
         false, // spherical
         4,     // num_cluster_segments
         0.9,   // alpha_significance_threshold

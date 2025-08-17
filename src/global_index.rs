@@ -1,7 +1,6 @@
 use::rayon::prelude::*;
 use::std::collections::{BinaryHeap, HashMap};
 use::std::sync::Arc;
-use::pyo3::prelude::*;
 use::serde::{Serialize, Deserialize};
 
 use crate::sparse_to_dense::SparseToDense;
@@ -11,7 +10,6 @@ use crate::utils::{
     ScoreHeapEntry, SegmentedCluster,
 };
 
-#[pyclass]
 #[derive(Serialize, Deserialize)]
 pub struct GlobalIndex {
     term_indices: Vec<TermIndex>,
@@ -21,15 +19,17 @@ pub struct GlobalIndex {
 
 impl GlobalIndex {
     pub fn new(data: Vec<Vec<(usize, f32)>>, parameters: ApproximateLexicalParameters) -> Self {
-        let projector = Arc::new(SparseToDense::new(
-            parameters.dense_dim_size,
-            parameters.num_clusters,
-        ));
         let max_term_index = data
             .par_iter()
             .flat_map_iter(|doc| doc.iter().map(|&(term, _)| term))
             .max()
             .unwrap_or(0);
+        
+        let projector = Arc::new(SparseToDense::new(
+            max_term_index,
+            parameters.dense_dim_size
+        ));
+        
 
         if max_term_index == 0 {
             println!("[GlobalIndex] no terms found in the data.");
