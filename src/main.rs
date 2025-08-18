@@ -1,4 +1,4 @@
-use bm25::{EmbedderBuilder, Embedding, Language, SearchEngineBuilder, SearchResult, Document, ScoredDocument, Scorer};
+use bm25::{DefaultTokenizer, EmbedderBuilder, Embedding, Language, SearchEngineBuilder, SearchResult, Document, ScoredDocument, Scorer};
 use clap::Parser;
 use serde::Deserialize;
 use std::fs::File;
@@ -28,6 +28,18 @@ struct Args {
 
     #[arg(short, long, default_value_t = 64)]
     top_k: usize,
+    
+    #[arg(short, long, default_value_t = 64)]
+    clusters_searched: usize,
+    
+    #[arg(short, long, default_value_t = 0)]
+    queries: usize,
+    
+    #[arg(long, default_value_t = 0)] // If the value is zero, then all documents work
+    documents: usize,
+    
+    #[arg(long, default_value_t = 5)]
+    max_top_k_multiple: usize
 }
 
 fn main() {
@@ -37,16 +49,34 @@ fn main() {
     let reader = BufReader::new(file);
 
     let dataset: DataSet = serde_json::from_reader(reader).expect("JSON was not well-formatted");
-    let documents: Vec<String> = dataset.documents;
-    let queries: Vec<String> = dataset.queries;
+    let mut documents: Vec<String> = dataset.documents;
+    let mut queries: Vec<String> = dataset.queries;
     
     println!("Read {} documents and {} queries from {}", documents.len(), queries.len(), dataset_path.clone());
 
+    if args.documents > 0 {
+        documents = documents.iter().take(args.documents).cloned().collect();
+        println!("Using {} documents for the search.", documents.len());
+    }
+    
+    if args.queries > 0 {
+        queries = queries.iter().take(args.queries).cloned().collect();
+        println!("Using {} queries for the search.", queries.len());
+    }
+    
     let document_refs: Vec<&str> = documents.iter().map(|s| s.as_str()).collect();
     let queries_refs: Vec<&str> = queries.iter().map(|s| s.as_str()).collect();
 
+    let tokenizer = DefaultTokenizer::builder()
+        .language_mode(Language::English)
+        .normalization(true)
+        .stopwords(true)
+        .stemming(true)
+        .build();
+    
+    
     let embedder =
-        EmbedderBuilder::<u32>::with_fit_to_corpus(Language::English, &document_refs).build();
+        EmbedderBuilder::<u32>::with_tokenizer_and_fit_to_corpus(tokenizer, &document_refs).build();
 
     let embedded_documents = document_refs
         .iter()
@@ -64,13 +94,13 @@ fn main() {
     
     // Build approximate search engine with default parameters
     let approx_params = ApproximateLexicalParameters::new(
-        128,   // num_clusters
-        256,   // dense_dim_size
+        1,   // num_clusters
+        64,   // dense_dim_size
         100,   // kmeanspp_sample
         10,    // kmeans_iterations
         1000,  // kmeans_batch_size
         false, // spherical
-        4,     // num_cluster_segments
+        1,     // num_cluster_segments
         0.9,   // alpha_significance_threshold
     );
 
@@ -93,10 +123,9 @@ fn main() {
     let mut precisions = Vec::new();
 
     // Different values of m (multiple of k)
-    let m_values = vec![1, 2, 3, 4, 5];
+    let m_values: Vec<usize> = (0..args.max_top_k_multiple).into_iter().collect();
 
-    for (query_idx, query) in queries.iter().enumerate() {
-        let query_embedding: Embedding = embedder.embed(&query);
+    for (query_idx, query_embedding) in embedded_queries.iter().enumerate() {
         let approx_query_embedding = query_embedding
             .iter()
             .map(|embed| (embed.index as usize, embed.value))
@@ -120,7 +149,7 @@ fn main() {
             let approx_start_time = Instant::now();
             let approx_results: Vec<(usize, f32)> = approximate_search_engine.query(
                 &approx_query_embedding,
-                32, // default # clusters
+                args.clusters_searched, // default # clusters
                 extended_top_k,
             );
             let approx_end_time = Instant::now();
@@ -140,6 +169,8 @@ fn main() {
                 .collect();
             let approx_doc_ids: std::collections::HashSet<u32> =
                 approx_top_k.iter().cloned().collect();
+            
+            println!("Retrieved {} approximate documents and {} regular documents.", approx_doc_ids.len(), original_doc_ids.len());
 
             let intersection_size = original_doc_ids.intersection(&approx_doc_ids).count();
             let recall = intersection_size as f64 / original_doc_ids.len() as f64;

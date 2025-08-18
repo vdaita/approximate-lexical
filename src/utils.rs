@@ -25,7 +25,7 @@ pub fn alpha_significance_compression(
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ApproximateLexicalParameters {
-    pub num_clusters: usize,
+    pub cluster_size: usize,
     pub dense_dim_size: usize,
     pub kmeanspp_sample: usize,
     pub kmeans_iterations: usize,
@@ -37,7 +37,7 @@ pub struct ApproximateLexicalParameters {
 
 impl ApproximateLexicalParameters {
     pub fn new(
-        num_clusters: usize,
+        cluster_size: usize,
         dense_dim_size: usize,
         kmeanspp_sample: usize,
         kmeans_iterations: usize,
@@ -47,7 +47,7 @@ impl ApproximateLexicalParameters {
         alpha_significance_threshold: f32,
     ) -> Self {
         ApproximateLexicalParameters {
-            num_clusters,
+            cluster_size,
             dense_dim_size,
             kmeanspp_sample,
             kmeans_iterations,

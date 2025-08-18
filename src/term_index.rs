@@ -13,13 +13,50 @@ pub struct TermIndex {
     projector: Arc<SparseToDense>, // keep the same one for every sub-index
 }
 
+struct Document {
+    doc_id: usize,
+    term_weights: Vec<(usize, f32)>,
+    dense_vector: Vec<f32>
+}
+
 impl TermIndex {
-    pub fn new(term: usize, documents: &Vec<Vec<(usize, f32)>>, projector: Arc<SparseToDense>, parameters: ApproximateLexicalParameters) -> Self {
-        let projected_documents = projector.project_multiple(documents);
+    pub fn new(term: usize, documents: Vec<&(usize, Vec<(usize, f32)>)>, projector: Arc<SparseToDense>, parameters: ApproximateLexicalParameters) -> Self {        
+        // Convert regular pairs into the full_documents type 
+        let full_documents: Vec<Document> = documents
+            .iter()
+            .map(|(doc_id, term_weights)| {
+                let dense_vector = projector.project(term_weights);
+                Document {
+                    doc_id: *doc_id,
+                    term_weights: term_weights.clone(),
+                    dense_vector,
+                }
+            })
+            .collect();
+
+        let projected_documents = full_documents
+            .iter()
+            .map(|doc| (doc.doc_id, doc.dense_vector.clone()))
+            .collect::<Vec<_>>();
+
+        let doc_id_term_weight_map: HashMap<usize, f32> = full_documents
+            .iter()
+            .map(|doc| {
+                let term_weight = doc.term_weights.iter()
+                    .find(|&&(term_id, _)| term_id == term)
+                    .map_or(1.0, |&(_, value)| value);
+                (doc.doc_id, term_weight)
+            })
+            .collect();
+        
         let kmeans_result = create_kmeans(
             &projected_documents, 
             &parameters
         );
+        let max_document_id = projected_documents.iter()
+            .map(|(doc_id, _)| *doc_id)
+            .max()
+            .unwrap_or(0);        
         
         let centroids = kmeans_result.centroids;
         let segmented_clusters: Vec<SegmentedCluster> = kmeans_result.cluster_assignments
@@ -27,8 +64,15 @@ impl TermIndex {
             .enumerate()
             .map(|(cluster_id, segment_ids)| {
                 let ids: Vec<usize> = segment_ids.iter().map(|&id| id).collect();
-                let values_map: HashMap<usize, f32> = ids.iter().map(|&id| (id, 1.0)).collect(); // Assuming all values are 1.0 for simplicity
-                TermIndex::format_cluster(term, cluster_id, &ids, &values_map, parameters.clone(), documents.len())
+                let values: Vec<f32> = ids.iter()
+                    .map(|&id| doc_id_term_weight_map.get(&id).copied().unwrap_or(1.0))
+                    .collect();
+                
+                let token_weight_pairs = ids.iter().zip(values.iter())
+                    .map(|(&id, &value)| (id, value))
+                    .collect::<Vec<_>>();
+                
+                TermIndex::format_cluster(term, cluster_id, token_weight_pairs, parameters.clone(), max_document_id)
             })
             .collect();
         
@@ -39,9 +83,11 @@ impl TermIndex {
         }
     }
     
+    
+    
     // create subclusters and use kmeans within the term 
     // subclusters get grouped into cluster segments
-    fn format_cluster(term_id: usize, cluster_id: usize, ids: &Vec<usize>, values_map: &HashMap<usize, f32>, parameters: ApproximateLexicalParameters, max_document_id: usize) -> SegmentedCluster {
+    fn format_cluster(term_id: usize, cluster_id: usize, token_weight_pairs: Vec<(usize, f32)>, parameters: ApproximateLexicalParameters, max_document_id: usize) -> SegmentedCluster {
         let mut segments: Vec<ClusterSegment> = Vec::new();
         let num_segments = parameters.num_cluster_segments;
         let segment_size = max_document_id / num_segments;
@@ -50,18 +96,17 @@ impl TermIndex {
             let start = i * segment_size;
             let end = if i == num_segments - 1 { max_document_id } else { start + segment_size };
 
-            // Simply slice the ids vector based on position instead of using values_map filtering
-            let segment_ids: Vec<usize> = ids[start..end].to_vec();
-
-            let segment_id_value_pairs: Vec<(usize, f32)> = segment_ids.iter()
-                .map(|&id| (id, values_map.get(&id).copied().unwrap_or(1.0)))
+            let segment_pairs: Vec<(usize, f32)> = token_weight_pairs
+                .iter()
+                .filter(|&&(id, _)| id >= start && id < end)
+                .cloned()
                 .collect();
-
+            
             segments.push(ClusterSegment {
                 cluster_id: i,
                 term_id: term_id,
                 segment_id: i,
-                segment: Arc::new(segment_id_value_pairs)
+                segment: Arc::new(segment_pairs)
             });
         }
 

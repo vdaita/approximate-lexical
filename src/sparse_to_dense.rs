@@ -13,14 +13,21 @@ pub struct SparseToDense {
 }
 
 impl SparseToDense {
-    pub fn new(vocab_map: HashMap<usize, usize>, target_dim: usize) -> Self {
+    pub fn new(vocab_list: &Vec<usize>, target_dim: usize) -> Self {
         let mut rng = rng();
         let normal = Normal::new(0.0, 1.0).unwrap();
-        let num_vocab = vocab_map.len();
+        let num_vocab = vocab_list.len();
         
         let random_matrix = Array2::from_shape_fn((num_vocab, target_dim), |_| {
             normal.sample(&mut rng) as f32
         });
+        
+        let vocab_map: HashMap<usize, usize> = vocab_list
+            .into_iter()
+            .enumerate()
+            .map(|(index, &term_id)| (term_id, index))
+            .collect();
+        
         SparseToDense { vocab_map, random_matrix }
     }
 

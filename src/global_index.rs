@@ -1,3 +1,4 @@
+use indicatif::ParallelProgressIterator;
 use::rayon::prelude::*;
 use::std::collections::{BinaryHeap, HashMap};
 use::std::sync::Arc;
@@ -18,54 +19,50 @@ pub struct GlobalIndex {
 }
 
 impl GlobalIndex {
-    pub fn new(data: Vec<Vec<(usize, f32)>>, parameters: ApproximateLexicalParameters) -> Self {
-        let unique_terms = data
-            .iter()
-            .flat_map(|doc| doc.iter().map(|&(term, _)| term))
-            .collect::<std::collections::HashSet<usize>>();
-
-        let unique_terms_map: HashMap<usize, usize> = unique_terms
-            .into_iter()
-            .enumerate()
-            .map(|(index, term)| (term, index))
-            .collect();
-                
-        let projector = Arc::new(SparseToDense::new(
-            unique_terms_map.clone(),
-            parameters.dense_dim_size
-        ));
-        
-        println!("[GlobalIndex] finished creating SparseToDense projector with {} terms and {} dimensions.", unique_terms_map.len(), parameters.dense_dim_size);
-
-        let approximated_documents: Vec<Vec<(usize, f32)>> = data
+    pub fn new(data: Vec<Vec<(usize, f32)>>, parameters: ApproximateLexicalParameters) -> Self {        
+        let approximated_documents: Vec<(usize, Vec<(usize, f32)>)> = data
             .into_par_iter()
-            .map(|doc| {
-                alpha_significance_compression(&doc, parameters.alpha_significance_threshold)
+            .enumerate()
+            .map(|(doc_id, doc)| {
+                (doc_id, alpha_significance_compression(&doc, parameters.alpha_significance_threshold))
             })
             .collect();
+        
+        let unique_terms = approximated_documents
+            .iter()
+            .flat_map(|doc| doc.1.iter().map(|&(term, _)| term))
+            .collect::<std::collections::HashSet<usize>>();
+        let unique_terms_vec = unique_terms.iter().cloned().collect::<Vec<usize>>();
+        println!("[GlobalIndex] finished creating SparseToDense projector with {} terms and {} dimensions.", (&unique_terms_vec).len(), parameters.dense_dim_size);
 
-        let term_indices: HashMap<usize, TermIndex> = unique_terms_map
+        let projector = Arc::new(SparseToDense::new(
+            &unique_terms_vec,
+            parameters.dense_dim_size
+        ));
+
+        let term_indices: HashMap<usize, TermIndex> = unique_terms_vec
             .into_par_iter()
-            .map(|(_, term_id)| {
-                let term_documents: Vec<Vec<(usize, f32)>> = approximated_documents
-                    .par_iter()
-                    .filter_map(|doc| {
-                        doc.iter()
-                            .find(|&&(t, _)| t == term_id)
-                            .map(|&(t, v)| vec![(t, v)]) // Collect only the term and its value
+            .progress()
+            .map(|term_id| {
+                let term_documents: Vec<&(usize, Vec<(usize, f32)>)> = approximated_documents
+                    .iter()
+                    .filter(|&(_, doc)| {
+                        doc.iter().any(|&(t, _)| t == term_id)
                     })
                     .collect();
                 
+                // println!("[GlobalIndex] for term {}, there are {} documents", term_id, term_documents.len());
+                
                 let term_index = TermIndex::new(
                     term_id,
-                    &term_documents,
+                    term_documents,
                     projector.clone(),
                     parameters.clone(),
                 );
                 
                 (term_id, term_index)
             })
-            .collect();
+            .collect::<HashMap<usize, TermIndex>>();
 
         GlobalIndex {
             term_indices: term_indices,
@@ -83,6 +80,10 @@ impl GlobalIndex {
         cluster_segments: Vec<&ClusterSegment>,
         top_k: usize,
     ) -> Vec<ScoreHeapEntry> {
+        cluster_segments.iter().for_each(|cluster_segment| {
+            println!("[weighted_top_k_lists] Processing ClusterSegment with id: {}, term_id: {}, length: {}", cluster_segment.cluster_id, cluster_segment.term_id, cluster_segment.segment.len());
+        });
+        
         let token_weight_list_ordered: HashMap<usize, f32> = query_weights
             .iter()
             .map(|&(token_id, weight)| (token_id, weight))
@@ -174,7 +175,12 @@ impl GlobalIndex {
             })
             .flatten_iter()
             .collect();
-
+        
+        println!(
+            "[GlobalIndex] Found {} segmented clusters for the query",
+            top_k_segmented_clusters.len()
+        );
+        
         let chunk_scores: Vec<(usize, f32)> = (0..self.parameters.num_cluster_segments)
             .into_par_iter()
             .map(|cluster_segment| {
@@ -182,9 +188,21 @@ impl GlobalIndex {
                     .iter()
                     .map(|segmented_cluster| &segmented_cluster.segments[cluster_segment])
                     .collect();
+                
+                println!(
+                    "[GlobalIndex] Processing segment {} with {} clusters",
+                    cluster_segment,
+                    cluster_segments.len()
+                );
 
                 let top_k_score_entries: Vec<ScoreHeapEntry> =
                     GlobalIndex::weighted_top_k_lists(query, cluster_segments, top_k_elements);
+                
+                println!(
+                    "[GlobalIndex] Found {} top-k score entries in segment {}",
+                    top_k_score_entries.len(),
+                    cluster_segment
+                );
 
                 let scores: Vec<(usize, f32)> = top_k_score_entries
                     .into_iter()

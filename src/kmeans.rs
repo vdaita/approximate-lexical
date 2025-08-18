@@ -2,7 +2,7 @@ use distances::vectors::{euclidean, euclidean_sq};
 use rand::prelude::IndexedRandom;
 use rayon::prelude::*;
 
-use crate::ApproximateLexicalParameters;
+use crate::{ApproximateLexicalParameters};
 
 pub struct MiniBatchKMeansResult {
     pub centroids: Vec<Vec<f32>>,
@@ -12,22 +12,23 @@ pub struct MiniBatchKMeansResult {
 }
 
 pub fn create_kmeans(
-    data: &Vec<Vec<f32>>,
+    data: &Vec<(usize, Vec<f32>)>,
     parameters: &ApproximateLexicalParameters,
 ) -> MiniBatchKMeansResult {
-    let mut centroids: Vec<Vec<f32>> = Vec::with_capacity(parameters.num_clusters);
+    let num_clusters: usize = (data.len() / parameters.cluster_size) + 1;
+    let mut centroids: Vec<Vec<f32>> = Vec::with_capacity(num_clusters);
     let mut rng = rand::rng();
     
-    if let Some(first) = data.choose(&mut rng) {
-        centroids.push(first.clone());
-        while centroids.len() < parameters.num_clusters {
-            let sampled_points: Vec<&Vec<f32>> = data
+    if let Some((_first_index, first_point)) = data.choose(&mut rng) {
+        centroids.push(first_point.clone());
+        while centroids.len() < num_clusters {
+            let sampled_points: Vec<&(usize, Vec<f32>)> = data
                 .choose_multiple(&mut rng, parameters.kmeanspp_sample)
                 .into_iter()
                 .collect();
             let sampled_distances: Vec<f32> = sampled_points
                 .par_iter()
-                .map(|point| {
+                .map(|&(_, point)| {
                     let min_dist: f32 = centroids
                         .iter()
                         .map(|centroid| euclidean_sq(point, centroid))
@@ -41,7 +42,7 @@ pub fn create_kmeans(
             let threshold = rand::random::<f32>() * total_distance;
             let mut cumulative: f32 = 0.0f32;
 
-            for (&point, &dist) in sampled_points.iter().zip(sampled_distances.iter()) {
+            for (&(_, point), &dist) in sampled_points.iter().zip(sampled_distances.iter()) {
                 cumulative += dist; // dist is now f32, not &f32
                 if cumulative >= threshold {
                     centroids.push(point.clone().to_vec());
@@ -53,12 +54,12 @@ pub fn create_kmeans(
 
     // use minibatch kmeans to assign clusters and refine centroids
     for _iter in 0..parameters.kmeans_iterations {
-        let batch_dataset: Vec<&Vec<f32>> = data
+        let batch_dataset: Vec<&(usize, Vec<f32>)> = data
             .choose_multiple(&mut rng, parameters.kmeans_batch_size)
             .collect();
         let distances = batch_dataset
             .par_iter()
-            .map(|point| {
+            .map(|&(_, point)| {
                 centroids
                     .iter()
                     .map(|centroid| euclidean(point, centroid))
@@ -76,13 +77,13 @@ pub fn create_kmeans(
                     .unwrap()
             })
             .collect::<Vec<usize>>();
-        for centroid_index in 0..parameters.num_clusters {
+        for centroid_index in 0..num_clusters {
             let cluster_points = batch_dataset
                 .iter()
                 .zip(labels.iter())
                 .filter(|(_, &label)| label == centroid_index)
                 .map(|(point, _)| *point) // iter works by passing a reference, so before collecting, you need to dereference so that you get the right type
-                .collect::<Vec<&Vec<f32>>>();
+                .collect::<Vec<&(usize, Vec<f32>)>>();
             let mut new_centroid = vec![0.0; parameters.dense_dim_size];
             if !cluster_points.is_empty() {
                 new_centroid.iter_mut().for_each(|x| *x = 0.0);
@@ -93,7 +94,7 @@ pub fn create_kmeans(
                             dim_i, parameters.dense_dim_size
                         );
                     }
-                    for point in &cluster_points {
+                    for (doc_id, point) in &cluster_points {
                         if point.len() != parameters.dense_dim_size {
                             panic!(
                                 "Point dimension mismatch: expected {}, got {}",
@@ -112,28 +113,33 @@ pub fn create_kmeans(
 
     let cluster_assignments = data
         .par_iter()
-        .map(|point| {
+        .map(|(doc_id, point)| {
             centroids
                 .iter()
                 .enumerate()
                 .map(|(i, centroid)| (i, euclidean::<f32, f32>(point, centroid)))
                 .min_by(|a, b| a.1.partial_cmp(&b.1).unwrap())
-                .map(|(i, _)| i)
+                .map(|(i, _)| (doc_id.clone(), i))
                 .unwrap()
         })
-        .collect::<Vec<usize>>();
+        .collect::<Vec<(usize, usize)>>();
 
-    let centroid_to_vector_ids = centroids
+    let centroid_to_doc_ids = centroids
         .iter()
         .enumerate()
         .map(|(i, _)| {
             cluster_assignments
                 .iter()
-                .enumerate()
-                .filter_map(|(j, &label)| if label == i { Some(j) } else { None })
+                .filter_map(|(doc_id, cluster_id)| {
+                    if *cluster_id == i {
+                        Some(*doc_id)
+                    } else {
+                        None
+                    }
+                })
                 .collect::<Vec<usize>>()
         })
-        .collect::<Vec<Vec<usize>>>();
+        .collect(); 
 
     if parameters.spherical {
         centroids.iter_mut().for_each(|centroid| {
@@ -144,8 +150,8 @@ pub fn create_kmeans(
 
     MiniBatchKMeansResult {
         centroids: centroids,
-        num_clusters: parameters.num_clusters,
+        num_clusters: num_clusters,
         dim_size: parameters.dense_dim_size,
-        cluster_assignments: centroid_to_vector_ids,
+        cluster_assignments: centroid_to_doc_ids,
     }
 }
