@@ -1,4 +1,7 @@
-use bm25::{DefaultTokenizer, EmbedderBuilder, Embedding, Language, SearchEngineBuilder, SearchResult, Document, ScoredDocument, Scorer};
+use bm25::{
+    DefaultTokenizer, Document, EmbedderBuilder, Embedding, Language, ScoredDocument, Scorer,
+    SearchEngineBuilder, SearchResult,
+};
 use clap::Parser;
 use serde::Deserialize;
 use std::fs::File;
@@ -13,6 +16,8 @@ mod utils;
 
 use crate::global_index::GlobalIndex;
 use crate::utils::ApproximateLexicalParameters;
+use log::{trace, debug, info};
+use env_logger;
 
 #[derive(Deserialize)]
 struct DataSet {
@@ -28,21 +33,24 @@ struct Args {
 
     #[arg(short, long, default_value_t = 64)]
     top_k: usize,
-    
+
     #[arg(short, long, default_value_t = 64)]
     clusters_searched: usize,
-    
+
     #[arg(short, long, default_value_t = 0)]
     queries: usize,
-    
+
     #[arg(long, default_value_t = 0)] // If the value is zero, then all documents work
     documents: usize,
-    
+
     #[arg(long, default_value_t = 5)]
-    max_top_k_multiple: usize
+    max_top_k_multiple: usize,
 }
 
 fn main() {
+    env_logger::init();
+    info!("Approximate BM25 Search");
+    
     let args = Args::parse();
     let dataset_path = format!("data/{}.json", args.dataset_source);
     let file = File::open(dataset_path.clone()).expect("Unable to open dataset file");
@@ -51,19 +59,24 @@ fn main() {
     let dataset: DataSet = serde_json::from_reader(reader).expect("JSON was not well-formatted");
     let mut documents: Vec<String> = dataset.documents;
     let mut queries: Vec<String> = dataset.queries;
-    
-    println!("Read {} documents and {} queries from {}", documents.len(), queries.len(), dataset_path.clone());
+
+    println!(
+        "Read {} documents and {} queries from {}",
+        documents.len(),
+        queries.len(),
+        dataset_path.clone()
+    );
 
     if args.documents > 0 {
         documents = documents.iter().take(args.documents).cloned().collect();
         println!("Using {} documents for the search.", documents.len());
     }
-    
+
     if args.queries > 0 {
         queries = queries.iter().take(args.queries).cloned().collect();
         println!("Using {} queries for the search.", queries.len());
     }
-    
+
     let document_refs: Vec<&str> = documents.iter().map(|s| s.as_str()).collect();
     let queries_refs: Vec<&str> = queries.iter().map(|s| s.as_str()).collect();
 
@@ -73,8 +86,7 @@ fn main() {
         .stopwords(true)
         .stemming(true)
         .build();
-    
-    
+
     let embedder =
         EmbedderBuilder::<u32>::with_tokenizer_and_fit_to_corpus(tokenizer, &document_refs).build();
 
@@ -86,16 +98,16 @@ fn main() {
         .iter()
         .map(|query| embedder.embed(query))
         .collect::<Vec<_>>();
-    
+
     let mut scorer = Scorer::<usize>::new();
     for (i, embedded_document) in embedded_documents.iter().enumerate() {
         scorer.upsert(&i, embedded_document.clone());
     }
-    
+
     // Build approximate search engine with default parameters
     let approx_params = ApproximateLexicalParameters::new(
-        1,   // num_clusters
-        64,   // dense_dim_size
+        16,    // cluster_size
+        16,    // dense_dim_size
         100,   // kmeanspp_sample
         10,    // kmeans_iterations
         1000,  // kmeans_batch_size
@@ -130,17 +142,13 @@ fn main() {
             .iter()
             .map(|embed| (embed.index as usize, embed.value))
             .collect::<Vec<(usize, f32)>>();
-
+        
         let regular_start_time = Instant::now();
-        let mut original_results: Vec<ScoredDocument<usize>> = scorer
-            .matches(&query_embedding)
-            .into_iter()
-            .collect();
+        let mut original_results: Vec<ScoredDocument<usize>> =
+            scorer.matches(&query_embedding).into_iter().collect();
         original_results.sort_by(|a, b| b.score.partial_cmp(&a.score).unwrap());
-        let original_results: Vec<ScoredDocument<usize>> = original_results
-            .into_iter()
-            .take(args.top_k)
-            .collect();
+        let original_results: Vec<ScoredDocument<usize>> =
+            original_results.into_iter().take(args.top_k).collect();
         let regular_end_time = Instant::now();
 
         for &m in &m_values {
@@ -169,8 +177,12 @@ fn main() {
                 .collect();
             let approx_doc_ids: std::collections::HashSet<u32> =
                 approx_top_k.iter().cloned().collect();
-            
-            println!("Retrieved {} approximate documents and {} regular documents.", approx_doc_ids.len(), original_doc_ids.len());
+
+            println!(
+                "Retrieved {} approximate documents and {} regular documents.",
+                approx_doc_ids.len(),
+                original_doc_ids.len()
+            );
 
             let intersection_size = original_doc_ids.intersection(&approx_doc_ids).count();
             let recall = intersection_size as f64 / original_doc_ids.len() as f64;

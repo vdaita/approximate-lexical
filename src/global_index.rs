@@ -3,6 +3,7 @@ use::rayon::prelude::*;
 use::std::collections::{BinaryHeap, HashMap};
 use::std::sync::Arc;
 use::serde::{Serialize, Deserialize};
+use log::{debug, trace};
 
 use crate::sparse_to_dense::SparseToDense;
 use crate::term_index::TermIndex;
@@ -79,9 +80,10 @@ impl GlobalIndex {
         query_weights: &Vec<(usize, f32)>,
         cluster_segments: Vec<&ClusterSegment>,
         top_k: usize,
+        segment_cluster_id: usize
     ) -> Vec<ScoreHeapEntry> {
         cluster_segments.iter().for_each(|cluster_segment| {
-            println!("[weighted_top_k_lists] Processing ClusterSegment with id: {}, term_id: {}, length: {}", cluster_segment.cluster_id, cluster_segment.term_id, cluster_segment.segment.len());
+            println!("[weighted_top_k_lists={}] Processing ClusterSegment with id: {}, term_id: {}, length: {}", segment_cluster_id, cluster_segment.cluster_id, cluster_segment.term_id, cluster_segment.segment.len());
         });
         
         let token_weight_list_ordered: HashMap<usize, f32> = query_weights
@@ -98,6 +100,7 @@ impl GlobalIndex {
                 index_sorted_heap.push(IndexHeapEntry::new(
                     first_doc_id,
                     first_term_score,
+                    cluster_segments.term_id,
                     list_id,
                     0,
                 ));
@@ -110,8 +113,21 @@ impl GlobalIndex {
         while let Some(index_heap_entry) = index_sorted_heap.pop() {
             let cluster_id: usize = index_heap_entry.cluster_id();
             let doc_id: usize = index_heap_entry.doc_id();
+            let token_id: usize = index_heap_entry.token_id();
             let score: f32 = index_heap_entry.score();
-            let Some(token_weight) = token_weight_list_ordered.get(&cluster_id) else {
+            
+            println!(
+                "[weighted_top_k_lists={} -> while loop] Processing doc_id: {}, score: {}, cluster_id: {}, token_id: {}, segment_index: {}",
+                segment_cluster_id, doc_id, score, cluster_id, token_id, index_heap_entry.segment_index()
+            );
+            
+            let Some(token_weight) = token_weight_list_ordered.get(&token_id) else {
+                println!(
+                    "[weighted_top_k_lists={} -> while loop] Processing cluster_id: {}, token {} not in query",
+                    segment_cluster_id,
+                    cluster_id,
+                    token_id
+                );
                 continue; // skip if the cluster is not in the query
             };
 
@@ -127,18 +143,20 @@ impl GlobalIndex {
                 current_index = doc_id;
                 current_score = token_weight * score;
             }
-            if index_heap_entry.segment_index()
+            if index_heap_entry.segment_index() + 1
                 < cluster_segments[index_heap_entry.segment_index()]
                     .segment
                     .len()
-                    - 1
             {
-                let (next_doc_id, next_term_score) = cluster_segments
-                    [index_heap_entry.segment_index()]
-                .segment[index_heap_entry.segment_index() + 1];
+                let cluster_segment = &cluster_segments[index_heap_entry.segment_index()];
+    
+                let (next_doc_id, next_term_score) = cluster_segment.segment[index_heap_entry.segment_index() + 1];
+                let term_id = cluster_segment.term_id;
+                
                 index_sorted_heap.push(IndexHeapEntry::new(
                     next_doc_id,
                     next_term_score,
+                    term_id,
                     index_heap_entry.cluster_id(),
                     index_heap_entry.segment_index() + 1,
                 ));
@@ -157,6 +175,7 @@ impl GlobalIndex {
         top_k_elements: usize,
     ) -> Vec<(usize, f32)> {
         let projected_vector = self.projector.project(query);
+        
         let query_weight_sum = query.iter().map(|&(_, value)| value).sum::<f32>();
         let normalized_query = query
             .iter()
@@ -167,7 +186,7 @@ impl GlobalIndex {
             .map(|&(term_id, weight)| {
                 let num_clusters = ((weight * (top_k_clusters as f32)).floor()) as usize;
                 let Some(term_index) = self.term_indices.get(&term_id) else {
-                    println!("Term ID {} not found in term indices", term_id);
+                    debug!("Term ID {} not found in term indices", term_id);
                     return vec![];
                 };
                 term_index
@@ -176,7 +195,7 @@ impl GlobalIndex {
             .flatten_iter()
             .collect();
         
-        println!(
+        debug!(
             "[GlobalIndex] Found {} segmented clusters for the query",
             top_k_segmented_clusters.len()
         );
@@ -189,16 +208,16 @@ impl GlobalIndex {
                     .map(|segmented_cluster| &segmented_cluster.segments[cluster_segment])
                     .collect();
                 
-                println!(
+                trace!(
                     "[GlobalIndex] Processing segment {} with {} clusters",
                     cluster_segment,
                     cluster_segments.len()
                 );
 
                 let top_k_score_entries: Vec<ScoreHeapEntry> =
-                    GlobalIndex::weighted_top_k_lists(query, cluster_segments, top_k_elements);
+                    GlobalIndex::weighted_top_k_lists(query, cluster_segments, top_k_elements, cluster_segment);
                 
-                println!(
+                debug!(
                     "[GlobalIndex] Found {} top-k score entries in segment {}",
                     top_k_score_entries.len(),
                     cluster_segment

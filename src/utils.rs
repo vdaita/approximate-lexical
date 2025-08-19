@@ -1,7 +1,8 @@
 use ordered_float::OrderedFloat;
-use std::sync::Arc;
-use serde::{Serialize, Deserialize};
+use serde::{Deserialize, Serialize};
 use std::cmp::Reverse;
+use std::sync::Arc;
+use log::{debug, trace, info};
 
 // alpha-significance to reduce size of posting lists
 pub fn alpha_significance_compression(
@@ -20,6 +21,9 @@ pub fn alpha_significance_compression(
             compressed.push((doc_id, score));
         }
     }
+    
+    trace!("Compressed vector: {:?}", compressed);
+    
     compressed
 }
 
@@ -79,15 +83,23 @@ pub struct ClusterSegment {
 pub struct IndexHeapEntry {
     pub doc_id: Reverse<usize>,
     pub score: OrderedFloat<f32>,
+    pub token_id: usize,
     pub cluster_id: usize,
     pub segment_index: usize,
 }
 
 impl IndexHeapEntry {
-    pub fn new(doc_id: usize, score: f32, cluster_id: usize, segment_index: usize) -> Self {
+    pub fn new(
+        doc_id: usize,
+        score: f32,
+        token_id: usize,
+        cluster_id: usize,
+        segment_index: usize,
+    ) -> Self {
         IndexHeapEntry {
             doc_id: Reverse(doc_id),
             score: OrderedFloat(score),
+            token_id,
             cluster_id,
             segment_index, // describes where in the segment you currently are
         }
@@ -99,6 +111,10 @@ impl IndexHeapEntry {
 
     pub fn doc_id(&self) -> usize {
         self.doc_id.0
+    }
+
+    pub fn token_id(&self) -> usize {
+        self.token_id
     }
 
     pub fn cluster_id(&self) -> usize {

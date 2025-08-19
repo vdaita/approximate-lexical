@@ -1,8 +1,9 @@
 use distances::vectors::{euclidean, euclidean_sq};
 use rand::prelude::IndexedRandom;
 use rayon::prelude::*;
+use log::trace;
 
-use crate::{ApproximateLexicalParameters};
+use crate::ApproximateLexicalParameters;
 
 pub struct MiniBatchKMeansResult {
     pub centroids: Vec<Vec<f32>>,
@@ -15,10 +16,29 @@ pub fn create_kmeans(
     data: &Vec<(usize, Vec<f32>)>,
     parameters: &ApproximateLexicalParameters,
 ) -> MiniBatchKMeansResult {
+    trace!("K-means starting with {} data points", data.len());
+
+    // Debug: Check if input data contains non-zero vectors
+    let non_zero_count = data
+        .iter()
+        .filter(|(_, vec)| vec.iter().any(|&x| x != 0.0))
+        .count();
+    trace!(
+        "Non-zero vectors in input: {}/{}",
+        non_zero_count,
+        data.len()
+    );
+
+    if let Some((_, first_vec)) = data.first() {
+        trace!("First input vector: {:?}", first_vec);
+    }
+
     let num_clusters: usize = (data.len() / parameters.cluster_size) + 1;
+    trace!("Creating {} clusters", num_clusters);
+
     let mut centroids: Vec<Vec<f32>> = Vec::with_capacity(num_clusters);
     let mut rng = rand::rng();
-    
+
     if let Some((_first_index, first_point)) = data.choose(&mut rng) {
         centroids.push(first_point.clone());
         while centroids.len() < num_clusters {
@@ -84,9 +104,25 @@ pub fn create_kmeans(
                 .filter(|(_, &label)| label == centroid_index)
                 .map(|(point, _)| *point) // iter works by passing a reference, so before collecting, you need to dereference so that you get the right type
                 .collect::<Vec<&(usize, Vec<f32>)>>();
+
+            trace!(
+                "Cluster {}: {} points",
+                centroid_index,
+                cluster_points.len()
+            );
+
             let mut new_centroid = vec![0.0; parameters.dense_dim_size];
             if !cluster_points.is_empty() {
                 new_centroid.iter_mut().for_each(|x| *x = 0.0);
+
+                // Debug: Print some sample points in this cluster
+                if cluster_points.len() > 0 {
+                    trace!(
+                        "Sample point in cluster {}: {:?}",
+                        centroid_index, cluster_points[0].1
+                    );
+                }
+
                 for dim_i in 0..parameters.dense_dim_size {
                     if dim_i >= parameters.dense_dim_size {
                         panic!(
@@ -94,7 +130,7 @@ pub fn create_kmeans(
                             dim_i, parameters.dense_dim_size
                         );
                     }
-                    for (doc_id, point) in &cluster_points {
+                    for (_doc_id, point) in &cluster_points {
                         if point.len() != parameters.dense_dim_size {
                             panic!(
                                 "Point dimension mismatch: expected {}, got {}",
@@ -106,7 +142,14 @@ pub fn create_kmeans(
                     }
                     new_centroid[dim_i] /= cluster_points.len() as f32;
                 }
+
+                trace!("Updated centroid {}: {:?}", centroid_index, new_centroid);
                 centroids[centroid_index] = new_centroid.clone();
+            } else {
+                trace!(
+                    "Cluster {} is empty, keeping old centroid: {:?}",
+                    centroid_index, centroids[centroid_index]
+                );
             }
         }
     }
@@ -139,7 +182,7 @@ pub fn create_kmeans(
                 })
                 .collect::<Vec<usize>>()
         })
-        .collect(); 
+        .collect();
 
     if parameters.spherical {
         centroids.iter_mut().for_each(|centroid| {

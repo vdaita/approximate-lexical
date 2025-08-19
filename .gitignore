@@ -1,6 +1,7 @@
 /target
 data/
 datasets/
+log.out
 
 # Byte-compiled / optimized / DLL files
 __pycache__/

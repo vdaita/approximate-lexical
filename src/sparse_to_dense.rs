@@ -1,10 +1,11 @@
-use ndarray::{Array2};
+use log::{debug, info, trace, warn};
+use ndarray::Array2;
 use rand::rng;
-use std::collections::HashMap;
-use rand_distr::{Normal, Distribution};
+use rand_distr::{Distribution, Normal};
 use rayon::iter::IntoParallelRefIterator;
 use rayon::prelude::*;
 use serde::{Deserialize, Serialize};
+use std::collections::HashMap;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct SparseToDense {
@@ -17,36 +18,43 @@ impl SparseToDense {
         let mut rng = rng();
         let normal = Normal::new(0.0, 1.0).unwrap();
         let num_vocab = vocab_list.len();
-        
-        let random_matrix = Array2::from_shape_fn((num_vocab, target_dim), |_| {
-            normal.sample(&mut rng) as f32
-        });
-        
+
+        let random_matrix =
+            Array2::from_shape_fn((num_vocab, target_dim), |_| normal.sample(&mut rng) as f32);
+
         let vocab_map: HashMap<usize, usize> = vocab_list
             .into_iter()
             .enumerate()
             .map(|(index, &term_id)| (term_id, index))
             .collect();
-        
-        SparseToDense { vocab_map, random_matrix }
+
+        SparseToDense {
+            vocab_map,
+            random_matrix,
+        }
     }
 
     pub fn project(&self, vector: &Vec<(usize, f32)>) -> Vec<f32> {
         let target_dim = self.random_matrix.shape()[1];
         let mut result = vec![0.0; target_dim];
+
         for &(token_id, value) in vector {
             let token_random_idx = self.vocab_map.get(&token_id).cloned().unwrap_or(token_id);
-            if token_id < self.random_matrix.shape()[0] {
+            if token_random_idx < self.random_matrix.shape()[0] {
                 let row = self.random_matrix.row(token_random_idx);
                 for (j, &r) in row.iter().enumerate() {
                     result[j] += value * r;
                 }
+            } else {
+                warn!(
+                    "Token {} mapped to index {} which is out of bounds for matrix with {} rows",
+                    token_id,
+                    token_random_idx,
+                    self.random_matrix.shape()[0]
+                );
             }
         }
+        trace!("Generated dense vector: {:?}", result);
         result
-    }
-    
-    pub fn project_multiple(&self, vector: &Vec<Vec<(usize, f32)>>) -> Vec<Vec<f32>> {
-        vector.par_iter().map(|v| self.project(v)).collect()
     }
 }
